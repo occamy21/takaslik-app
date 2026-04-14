@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+client/node_modules/
+
+# Build outputs
+client/dist/
+client/.vite/
+
+# Environment
+.env
+.env.local
+.env.production.local
+.env.development.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/settings.json
+.idea/
+
+# Claude Code local config
+.claude/
+
+# Stale root-level files (real source is in client/src/)
+App.css
+App.jsx
+
+# Misc
+*.sqlite
+*.db
