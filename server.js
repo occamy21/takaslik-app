@@ -9,7 +9,8 @@ const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch
 const app = express();
 const db = new sqlite3.Database(':memory:');
 
-const SECRET = 'takas-platform-secret-key';
+const SECRET = process.env.JWT_SECRET;
+if (!SECRET) throw new Error('JWT_SECRET environment variable is not set');
 const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || 'your-api-key-here';
 
 // Middleware
@@ -149,13 +150,16 @@ const auth = (req, res, next) => {
 app.post('/api/auth/register', (req, res) => {
   const { email, password, name } = req.body;
   if (!email || !password || !name) return res.status(400).json({ error: 'Tüm alanlar zorunlu' });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Geçersiz e-posta' });
+  if (password.length < 6) return res.status(400).json({ error: 'Şifre en az 6 karakter olmalı' });
+  if (name.trim().length < 2) return res.status(400).json({ error: 'İsim en az 2 karakter olmalı' });
   const hash = bcrypt.hashSync(password, 10);
   db.run(
     'INSERT INTO users (email, password, name) VALUES (?, ?, ?)',
-    [email, hash, name],
+    [email.toLowerCase().trim(), hash, name.trim()],
     function(err) {
       if (err) return res.status(400).json({ error: 'Bu e-posta zaten kullanılıyor' });
-      const token = jwt.sign({ id: this.lastID, email }, SECRET);
+      const token = jwt.sign({ id: this.lastID, email }, SECRET, { expiresIn: '7d' });
       res.json({ token, user: { id: this.lastID, email, name } });
     }
   );
@@ -163,11 +167,11 @@ app.post('/api/auth/register', (req, res) => {
 
 app.post('/api/auth/login', (req, res) => {
   const { email, password } = req.body;
-  db.get('SELECT * FROM users WHERE email = ?', [email], (err, user) => {
+  db.get('SELECT * FROM users WHERE email = ?', [email.toLowerCase().trim()], (_err, user) => {
     if (!user || !bcrypt.compareSync(password, user.password)) {
       return res.status(401).json({ error: 'E-posta veya şifre hatalı' });
     }
-    const token = jwt.sign({ id: user.id, email }, SECRET);
+    const token = jwt.sign({ id: user.id, email }, SECRET, { expiresIn: '7d' });
     res.json({ token, user: { id: user.id, email: user.email, name: user.name } });
   });
 });
@@ -246,7 +250,7 @@ app.post('/api/like/:productId', auth, (req, res) => {
       if (err) return res.status(400).json({ error: err.message });
 
       // Find the product's owner
-      db.get('SELECT user_id FROM products WHERE id = ?', [productId], (err, product) => {
+      db.get('SELECT user_id FROM products WHERE id = ?', [productId], (_err, product) => {
         if (!product) return res.json({ matched: false });
         const otherUserId = product.user_id;
 
@@ -258,7 +262,7 @@ app.post('/api/like/:productId', auth, (req, res) => {
            WHERE l.user_id = ? AND p.user_id = ?
            LIMIT 1`,
           [otherUserId, userId],
-          (err, mutual) => {
+          (_err, mutual) => {
             if (!mutual) return res.json({ matched: false });
 
             // Check if match already exists
@@ -266,7 +270,7 @@ app.post('/api/like/:productId', auth, (req, res) => {
               `SELECT id FROM matches
                WHERE (user1_id = ? AND user2_id = ?) OR (user1_id = ? AND user2_id = ?)`,
               [userId, otherUserId, otherUserId, userId],
-              (err, existing) => {
+              (_err, existing) => {
                 if (existing) return res.json({ matched: true, matchId: existing.id, existing: true });
 
                 // Create new match
@@ -322,7 +326,7 @@ app.post('/api/matches/:matchId/messages', auth, (req, res) => {
   db.get(
     'SELECT id FROM matches WHERE id = ? AND (user1_id = ? OR user2_id = ?)',
     [matchId, req.user.id, req.user.id],
-    (err, match) => {
+    (_err, match) => {
       if (!match) return res.status(403).json({ error: 'Yetkisiz erişim' });
       db.run(
         'INSERT INTO messages (match_id, sender_id, content) VALUES (?, ?, ?)',
@@ -341,7 +345,7 @@ app.get('/api/matches/:matchId/messages', auth, (req, res) => {
   db.get(
     'SELECT id FROM matches WHERE id = ? AND (user1_id = ? OR user2_id = ?)',
     [matchId, req.user.id, req.user.id],
-    (err, match) => {
+    (_err, match) => {
       if (!match) return res.status(403).json({ error: 'Yetkisiz erişim' });
       db.all(
         'SELECT * FROM messages WHERE match_id = ? ORDER BY created_at ASC',
