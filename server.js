@@ -188,7 +188,7 @@ app.post('/api/products', auth, upload.single('image'), async (req, res) => {
       location: location || '',
       wishlist: wishlist || '',
     });
-    res.json(product);
+    res.json({ ...product.toObject(), id: product._id, created_at: product.createdAt });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -204,7 +204,8 @@ app.get('/api/products', auth, async (req, res) => {
     res.json(products.map(p => ({
       ...p,
       id: p._id,
-      image_data: p.imageUrl,   // keep field name so existing frontend doesn't break
+      created_at: p.createdAt,
+      image_data: p.imageUrl,
       owner_name: p.userId?.name,
     })));
   } catch (err) {
@@ -218,7 +219,7 @@ app.get('/api/my-products', auth, async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    res.json(products.map(p => ({ ...p, id: p._id, image_data: p.imageUrl })));
+    res.json(products.map(p => ({ ...p, id: p._id, created_at: p.createdAt, image_data: p.imageUrl })));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -325,7 +326,7 @@ app.get('/api/matches/:matchId/messages', auth, async (req, res) => {
     if (!match) return res.status(403).json({ error: 'Yetkisiz erişim' });
 
     const messages = await Message.find({ matchId }).sort({ createdAt: 1 }).lean();
-    res.json(messages.map(m => ({ ...m, id: m._id, sender_id: m.senderId })));
+    res.json(messages.map(m => ({ ...m, id: m._id, sender_id: m.senderId, created_at: m.createdAt })));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -349,7 +350,7 @@ app.get('/api/admin/stats', adminAuth, async (_req, res) => {
 app.get('/api/admin/users', adminAuth, async (_req, res) => {
   try {
     const users = await User.find().select('_id email name createdAt').sort({ createdAt: -1 }).lean();
-    res.json(users);
+    res.json(users.map(u => ({ ...u, id: u._id, created_at: u.createdAt })));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -362,7 +363,7 @@ app.get('/api/admin/products', adminAuth, async (_req, res) => {
       .select('_id title category condition location createdAt userId')
       .sort({ createdAt: -1 })
       .lean();
-    res.json(products.map(p => ({ ...p, owner_name: p.userId?.name })));
+    res.json(products.map(p => ({ ...p, id: p._id, created_at: p.createdAt, owner_name: p.userId?.name })));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -149,7 +149,7 @@ function useAuth() {
 function normalize(p) {
   return {
     ...p,
-    image:     p.image_data ? `data:image/jpeg;base64,${p.image_data}` : null,
+    image:     p.imageUrl || p.image_data || null,
     city:      p.location   || p.city  || '',
     desc:      p.description || p.desc || '',
     owner:     p.owner_name  || p.owner || '?',
@@ -648,7 +648,7 @@ function AddPage({ authFetch, navigate }) {
       if (imageFile) fd.append('image', imageFile);
       const r = await authFetch('/api/products', { method: 'POST', body: fd });
       const d = await r.json();
-      if (d.id) { setDone(true); setTimeout(() => navigate('explore'), 1600); }
+      if (d.id || d._id) { setDone(true); setTimeout(() => navigate('explore'), 1600); }
       else setError(d.error || 'Bir hata oluştu');
     } catch { setError('Sunucuya bağlanılamadı'); }
     setLoading(false);
@@ -855,7 +855,7 @@ function MatchesPage({ authFetch, navigate, user }) {
                 <div key={msg.id} className={`chat-msg ${msg.sender_id === user?.id ? 'mine' : 'theirs'}`}>
                   <div className="msg-bubble">{msg.content}</div>
                   <div className="msg-time">
-                    {new Date(msg.created_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                    {new Date(msg.created_at || msg.createdAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
               ))}
