@@ -82,8 +82,11 @@ const ALLOWED_ORIGINS = [
 
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-    cb(new Error('Not allowed by CORS'));
+    if (!origin) return cb(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    // Allow any Vercel preview/production deployment
+    if (/^https:\/\/[a-z0-9-]+(\.vercel\.app)$/.test(origin)) return cb(null, true);
+    cb(new Error(`CORS blocked: ${origin}`));
   },
   credentials: true,
 }));
@@ -408,6 +411,10 @@ app.post('/api/products/evaluate', auth, upload.single('image'), async (req, res
   } catch {
     res.status(500).json({ error: 'Değerlendirme başarısız' });
   }
+});
+
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected' });
 });
 
 const PORT = process.env.PORT || 3001;

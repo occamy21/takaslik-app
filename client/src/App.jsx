@@ -3,7 +3,7 @@ import './App.css';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const API          = import.meta.env.VITE_API_URL ?? '';
+const API          = (import.meta.env.VITE_API_URL ?? '').replace(/\/api\/?$/, '');
 const ADMIN_EMAIL  = 'denizfurkan030@gmail.com';
 
 const CITIES = ['İstanbul', 'Bursa', 'Tekirdağ', 'Edirne', 'Kırklareli', 'Kocaeli', 'Yalova'];
