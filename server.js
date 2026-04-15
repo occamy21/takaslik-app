@@ -355,6 +355,72 @@ app.get('/api/matches/:matchId/messages', auth, (req, res) => {
   );
 });
 
+// ─── Admin Middleware ──────────────────────────────────────────────────────────
+
+const ADMIN_EMAIL = 'denizfurkan030@gmail.com';
+
+const adminAuth = (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Token required' });
+  try {
+    const decoded = jwt.verify(token, SECRET);
+    if (decoded.email !== ADMIN_EMAIL) return res.status(403).json({ error: 'Admin yetkisi gerekli' });
+    req.user = decoded;
+    next();
+  } catch {
+    res.status(401).json({ error: 'Invalid token' });
+  }
+};
+
+// ─── Admin Routes ──────────────────────────────────────────────────────────────
+
+app.get('/api/admin/stats', adminAuth, (_req, res) => {
+  db.get('SELECT COUNT(*) as users FROM users', [], (_err, u) => {
+    db.get('SELECT COUNT(*) as products FROM products', [], (_err2, p) => {
+      db.get('SELECT COUNT(*) as matches FROM matches', [], (_err3, m) => {
+        db.get('SELECT COUNT(*) as messages FROM messages', [], (_err4, msg) => {
+          res.json({
+            users:    u?.users    || 0,
+            products: p?.products || 0,
+            matches:  m?.matches  || 0,
+            messages: msg?.messages || 0,
+          });
+        });
+      });
+    });
+  });
+});
+
+app.get('/api/admin/users', adminAuth, (_req, res) => {
+  db.all('SELECT id, email, name, created_at FROM users ORDER BY created_at DESC', [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
+  });
+});
+
+app.get('/api/admin/products', adminAuth, (_req, res) => {
+  db.all(
+    `SELECT p.id, p.title, p.category, p.condition, p.location, p.created_at, u.name as owner_name
+     FROM products p
+     JOIN users u ON p.user_id = u.id
+     ORDER BY p.created_at DESC`,
+    [],
+    (err, rows) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(rows);
+    }
+  );
+});
+
+app.delete('/api/admin/products/:id', adminAuth, (req, res) => {
+  const id = parseInt(req.params.id);
+  db.run('DELETE FROM products WHERE id = ?', [id], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    if (this.changes === 0) return res.status(404).json({ error: 'Ürün bulunamadı' });
+    res.json({ ok: true });
+  });
+});
+
 // ─── AI Evaluate (optional) ────────────────────────────────────────────────────
 
 app.post('/api/products/evaluate', auth, upload.single('image'), async (req, res) => {

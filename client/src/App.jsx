@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
 import './App.css';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const API = import.meta.env.VITE_API_URL ?? '';
+const API          = import.meta.env.VITE_API_URL ?? '';
+const ADMIN_EMAIL  = 'denizfurkan030@gmail.com';
 
 const CITIES = ['İstanbul', 'Bursa', 'Tekirdağ', 'Edirne', 'Kırklareli', 'Kocaeli', 'Yalova'];
 
@@ -17,13 +18,31 @@ const CATEGORIES = {
 
 const CONDITIONS = ['Yeni', 'Çok İyi', 'İyi', 'Orta'];
 
-const CAT_STYLE = {
-  'Kitap':        { emoji: '📚', bg: '#1C1A0D', text: '#FCD34D', border: '#3D3315' },
-  'Oyun':         { emoji: '🎮', bg: '#17133A', text: '#C4B5FD', border: '#2D2558' },
-  'Ders Notları': { emoji: '📝', bg: '#0D2018', text: '#6EE7B7', border: '#163525' },
-  'Ders Eğitimi': { emoji: '🎓', bg: '#0D1B30', text: '#93C5FD', border: '#152D4A' },
-  'Diğer':        { emoji: '📦', bg: '#20100F', text: '#FCA5A5', border: '#3A1A18' },
+const CAT = {
+  dark: {
+    'Kitap':        { emoji: '📚', bg: '#1C1A0D', text: '#FCD34D', border: '#3D3315' },
+    'Oyun':         { emoji: '🎮', bg: '#17133A', text: '#C4B5FD', border: '#2D2558' },
+    'Ders Notları': { emoji: '📝', bg: '#0D2018', text: '#6EE7B7', border: '#163525' },
+    'Ders Eğitimi': { emoji: '🎓', bg: '#0D1B30', text: '#93C5FD', border: '#152D4A' },
+    'Diğer':        { emoji: '📦', bg: '#20100F', text: '#FCA5A5', border: '#3A1A18' },
+  },
+  light: {
+    'Kitap':        { emoji: '📚', bg: '#FEF9C3', text: '#92400E', border: '#FCD34D' },
+    'Oyun':         { emoji: '🎮', bg: '#EDE9FE', text: '#5B21B6', border: '#C4B5FD' },
+    'Ders Notları': { emoji: '📝', bg: '#D1FAE5', text: '#065F46', border: '#6EE7B7' },
+    'Ders Eğitimi': { emoji: '🎓', bg: '#DBEAFE', text: '#1E40AF', border: '#93C5FD' },
+    'Diğer':        { emoji: '📦', bg: '#FFE4E6', text: '#9F1239', border: '#FCA5A5' },
+  },
 };
+
+// ─── Theme Context ─────────────────────────────────────────────────────────────
+
+const ThemeCtx = createContext('dark');
+
+function useCAT(category) {
+  const theme = useContext(ThemeCtx);
+  return CAT[theme]?.[category] ?? CAT[theme]['Diğer'];
+}
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
@@ -87,7 +106,11 @@ function useAuth() {
         body: JSON.stringify({ email, password }),
       });
       const d = await r.json();
-      if (d.token) { setToken(d.token); setUser(d.user); return { ok: true }; }
+      if (d.token) {
+        setToken(d.token);
+        setUser({ ...d.user, is_admin: email === ADMIN_EMAIL });
+        return { ok: true, is_admin: email === ADMIN_EMAIL };
+      }
       return { ok: false, error: d.error || 'Giriş başarısız' };
     } catch { return { ok: false, error: 'Sunucuya bağlanılamadı' }; }
   };
@@ -100,7 +123,11 @@ function useAuth() {
         body: JSON.stringify({ email, password, name }),
       });
       const d = await r.json();
-      if (d.token) { setToken(d.token); setUser(d.user); return { ok: true }; }
+      if (d.token) {
+        setToken(d.token);
+        setUser({ ...d.user, is_admin: email === ADMIN_EMAIL });
+        return { ok: true, is_admin: email === ADMIN_EMAIL };
+      }
       return { ok: false, error: d.error || 'Kayıt başarısız' };
     } catch { return { ok: false, error: 'Sunucuya bağlanılamadı' }; }
   };
@@ -108,8 +135,10 @@ function useAuth() {
   const logout = () => { setToken(null); setUser(null); };
 
   const authFetch = useCallback((path, opts = {}) => {
-    const headers = { 'Authorization': `Bearer ${token}`, ...opts.headers };
-    return fetch(`${API}${path}`, { ...opts, headers });
+    return fetch(`${API}${path}`, {
+      ...opts,
+      headers: { 'Authorization': `Bearer ${token}`, ...opts.headers },
+    });
   }, [token]);
 
   return { token, user, login, register, logout, isAuth: !!token, authFetch };
@@ -136,19 +165,44 @@ function normalize(p) {
 
 function Logo() {
   return (
-    <svg width="32" height="32" viewBox="0 0 34 34" fill="none">
-      <rect x="1.5"  y="3"  width="31" height="10" rx="5"   stroke="#DC2626" strokeWidth="2.4" fill="none"/>
-      <rect x="5"    y="6"  width="16" height="4"  rx="2"   stroke="#DC2626" strokeWidth="1.5" fill="none"/>
-      <rect x="13"   y="7"  width="8"  height="24" rx="4"   stroke="#DC2626" strokeWidth="2.4" fill="none"/>
-      <rect x="15.5" y="10" width="3"  height="17" rx="1.5" stroke="#DC2626" strokeWidth="1.4" fill="none"/>
+    <svg width="30" height="30" viewBox="0 0 34 34" fill="none">
+      <rect x="1.5"  y="3"  width="31" height="10" rx="5"   stroke="#F04747" strokeWidth="2.4" fill="none"/>
+      <rect x="5"    y="6"  width="16" height="4"  rx="2"   stroke="#F04747" strokeWidth="1.5" fill="none"/>
+      <rect x="13"   y="7"  width="8"  height="24" rx="4"   stroke="#F04747" strokeWidth="2.4" fill="none"/>
+      <rect x="15.5" y="10" width="3"  height="17" rx="1.5" stroke="#F04747" strokeWidth="1.4" fill="none"/>
     </svg>
+  );
+}
+
+// ─── Theme Toggle Button ───────────────────────────────────────────────────────
+
+function ThemeToggle({ theme, onToggle }) {
+  return (
+    <button
+      className="theme-toggle"
+      onClick={onToggle}
+      title={theme === 'dark' ? 'Açık temaya geç' : 'Koyu temaya geç'}
+      aria-label="Tema değiştir"
+    >
+      {theme === 'dark' ? (
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 3a9 9 0 100 18A9 9 0 0012 3zm0 2a7 7 0 110 14A7 7 0 0112 5zm0 1a6 6 0 100 12A6 6 0 0012 6z"/>
+          <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+          <circle cx="12" cy="12" r="4" fill="currentColor"/>
+        </svg>
+      ) : (
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+        </svg>
+      )}
+    </button>
   );
 }
 
 // ─── Product Card (Grid) ──────────────────────────────────────────────────────
 
 function ProductCard({ product, favorites, onFav }) {
-  const cs  = CAT_STYLE[product.category] || CAT_STYLE['Diğer'];
+  const cs  = useCAT(product.category);
   const fav = favorites.includes(product.id);
   const ago = (() => {
     const d = Math.floor((Date.now() - (product.createdAt || 0)) / 86400000);
@@ -181,13 +235,11 @@ function ProductCard({ product, favorites, onFav }) {
           <span className="pcard-cond">{product.condition}</span>
         </div>
         <p className="pcard-desc">{product.desc}</p>
-
         {product.wishlist && (
           <div className="pcard-wish">
             <span className="wish-pill">🔄 {product.wishlist}</span>
           </div>
         )}
-
         <div className="pcard-foot">
           <span className="price-tag takas">🔄 Takas</span>
         </div>
@@ -207,7 +259,7 @@ function SwipeCard({ product, onSwipe, isTop, zIndex, stackIndex, favorites, onF
   const [drag, setDrag]     = useState({ x: 0, y: 0, active: false });
   const [flying, setFlying] = useState(null);
   const startPos = useRef(null);
-  const cs  = CAT_STYLE[product.category] || CAT_STYLE['Diğer'];
+  const cs  = useCAT(product.category);
   const fav = favorites.includes(product.id);
 
   const getPos = e => {
@@ -268,7 +320,6 @@ function SwipeCard({ product, onSwipe, isTop, zIndex, stackIndex, favorites, onF
       onMouseDown={onStart} onMouseMove={onMove} onMouseUp={onEnd} onMouseLeave={onEnd}
       onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd}
     >
-      {/* Swipe stamps */}
       <div className="sc-stamp sc-stamp-like" style={{ opacity: likeOp }}>
         <span>❤</span> Teklif Ver
       </div>
@@ -276,7 +327,6 @@ function SwipeCard({ product, onSwipe, isTop, zIndex, stackIndex, favorites, onF
         <span>✕</span> Geç
       </div>
 
-      {/* Image */}
       <div className="sc-img" style={{ background: cs.bg }}>
         {product.image
           ? <img src={product.image} alt={product.title} draggable="false" />
@@ -296,7 +346,6 @@ function SwipeCard({ product, onSwipe, isTop, zIndex, stackIndex, favorites, onF
         </div>
       </div>
 
-      {/* Info */}
       <div className="sc-body">
         <h3 className="sc-title">{product.title}</h3>
         <div className="sc-meta">
@@ -304,14 +353,12 @@ function SwipeCard({ product, onSwipe, isTop, zIndex, stackIndex, favorites, onF
           <span className="sc-cond">{product.condition}</span>
         </div>
         <p className="sc-desc">{product.desc}</p>
-
         {product.wishlist && (
           <div className="sc-wish">
             <span className="sc-wish-label">🔄 Aradığı:</span>
             <span className="sc-wish-text">{product.wishlist}</span>
           </div>
         )}
-
         <div className="sc-owner">
           <span className="owner-av">{product.owner[0]?.toUpperCase()}</span>
           <span className="owner-name">{product.owner}</span>
@@ -351,7 +398,6 @@ function SwipeView({ products, favorites, onFav, authFetch, navigate }) {
 
   const handleSwipe = useCallback(async (dir, product) => {
     setGone(g => new Set([...g, product.id]));
-
     if (dir === 'right') {
       setLikedIds(l => [...l, product.id]);
       try {
@@ -390,7 +436,6 @@ function SwipeView({ products, favorites, onFav, authFetch, navigate }) {
           onGoChat={() => { setMatchModal(false); navigate('matches'); }}
         />
       )}
-
       <div className="swipe-view">
         <div className="swipe-progress">
           <span>{remaining.length} ilan kaldı</span>
@@ -442,6 +487,8 @@ function SwipeView({ products, favorites, onFav, authFetch, navigate }) {
 // ─── Filter Bar ───────────────────────────────────────────────────────────────
 
 function FilterBar({ f, set }) {
+  const theme = useContext(ThemeCtx);
+  const catList = Object.keys(CAT[theme]);
   return (
     <div className="filter-bar">
       <div className="filter-search">
@@ -457,7 +504,7 @@ function FilterBar({ f, set }) {
       <div className="filter-selects">
         <select value={f.cat} onChange={e => set({ ...f, cat: e.target.value })}>
           <option value="">Tüm Kategoriler</option>
-          {Object.keys(CATEGORIES).map(c => <option key={c}>{c}</option>)}
+          {catList.map(c => <option key={c}>{c}</option>)}
         </select>
         <select value={f.city} onChange={e => set({ ...f, city: e.target.value })}>
           <option value="">Tüm Şehirler</option>
@@ -477,6 +524,7 @@ function FilterBar({ f, set }) {
 const EMPTY_F = { q: '', cat: '', city: '', sort: 'new' };
 
 function ExplorePage({ favorites, onFav, authFetch, navigate }) {
+  const theme = useContext(ThemeCtx);
   const [mode,     setMode]     = useState('swipe');
   const [products, setProducts] = useState([]);
   const [loading,  setLoading]  = useState(true);
@@ -486,7 +534,7 @@ function ExplorePage({ favorites, onFav, authFetch, navigate }) {
     setLoading(true);
     authFetch('/api/products')
       .then(r => r.json())
-      .then(data => { setProducts(Array.isArray(data) ? data.map(normalize) : []); })
+      .then(data => setProducts(Array.isArray(data) ? data.map(normalize) : []))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [authFetch]);
@@ -498,15 +546,15 @@ function ExplorePage({ favorites, onFav, authFetch, navigate }) {
     if (f.city && p.city     !== f.city) return false;
     return true;
   });
-
   list = [...list].sort((a, b) => {
     if (f.sort === 'az') return a.title.localeCompare(b.title);
     return (b.createdAt || 0) - (a.createdAt || 0);
   });
 
+  const catStyles = CAT[theme];
+
   return (
     <div className="explore-page">
-      {/* Mode toggle */}
       <div className="mode-toggle">
         <button className={mode === 'swipe' ? 'active' : ''} onClick={() => setMode('swipe')}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
@@ -524,27 +572,17 @@ function ExplorePage({ favorites, onFav, authFetch, navigate }) {
       </div>
 
       {loading ? (
-        <div className="loading-state">
-          <div className="spinner" />
-          <p>Yükleniyor...</p>
-        </div>
+        <div className="loading-state"><div className="spinner" /><p>Yükleniyor...</p></div>
       ) : mode === 'swipe' ? (
-        <SwipeView
-          products={list}
-          favorites={favorites}
-          onFav={onFav}
-          authFetch={authFetch}
-          navigate={navigate}
-        />
+        <SwipeView products={list} favorites={favorites} onFav={onFav} authFetch={authFetch} navigate={navigate} />
       ) : (
         <>
           <FilterBar f={f} set={setF} />
-
           <div className="cat-pills">
             <button className={`pill ${!f.cat ? 'active' : ''}`} onClick={() => setF({ ...f, cat: '' })}>
               Tümü
             </button>
-            {Object.entries(CAT_STYLE).map(([name, s]) => (
+            {Object.entries(catStyles).map(([name, s]) => (
               <button
                 key={name}
                 className={`pill ${f.cat === name ? 'active' : ''}`}
@@ -555,14 +593,12 @@ function ExplorePage({ favorites, onFav, authFetch, navigate }) {
               </button>
             ))}
           </div>
-
           <div className="explore-top">
             <span className="result-count"><strong>{list.length}</strong> ilan</span>
             {(f.cat || f.city || f.q) && (
               <button className="clear-btn" onClick={() => setF(EMPTY_F)}>Filtreleri Temizle</button>
             )}
           </div>
-
           {list.length === 0 ? (
             <div className="empty-state">
               <div className="es-icon">🔍</div>
@@ -572,9 +608,7 @@ function ExplorePage({ favorites, onFav, authFetch, navigate }) {
             </div>
           ) : (
             <div className="pgrid">
-              {list.map(p => (
-                <ProductCard key={p.id} product={p} favorites={favorites} onFav={onFav} />
-              ))}
+              {list.map(p => <ProductCard key={p.id} product={p} favorites={favorites} onFav={onFav} />)}
             </div>
           )}
         </>
@@ -594,7 +628,6 @@ function AddPage({ authFetch, navigate }) {
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState('');
   const [done,      setDone]      = useState(false);
-
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   const handleImg = e => {
@@ -608,24 +641,16 @@ function AddPage({ authFetch, navigate }) {
 
   const handleSubmit = async e => {
     e.preventDefault();
-    setLoading(true);
-    setError('');
+    setLoading(true); setError('');
     try {
       const fd = new FormData();
       Object.entries(form).forEach(([k, v]) => fd.append(k, v));
       if (imageFile) fd.append('image', imageFile);
-
       const r = await authFetch('/api/products', { method: 'POST', body: fd });
       const d = await r.json();
-      if (d.id) {
-        setDone(true);
-        setTimeout(() => navigate('explore'), 1600);
-      } else {
-        setError(d.error || 'Bir hata oluştu');
-      }
-    } catch {
-      setError('Sunucuya bağlanılamadı');
-    }
+      if (d.id) { setDone(true); setTimeout(() => navigate('explore'), 1600); }
+      else setError(d.error || 'Bir hata oluştu');
+    } catch { setError('Sunucuya bağlanılamadı'); }
     setLoading(false);
   };
 
@@ -644,11 +669,8 @@ function AddPage({ authFetch, navigate }) {
       <div className="add-card">
         <h2>Yeni İlan</h2>
         <p className="add-sub">Takaslamak istediğin ürünü ekle</p>
-
         {error && <div className="form-error">{error}</div>}
-
         <form onSubmit={handleSubmit} className="add-form">
-          {/* Photo */}
           <div className="fg">
             <label>Fotoğraf</label>
             <label className="upload-box">
@@ -659,15 +681,11 @@ function AddPage({ authFetch, navigate }) {
               }
             </label>
           </div>
-
-          {/* Title */}
           <div className="fg">
             <label>Başlık *</label>
             <input type="text" placeholder="Ürün adı" value={form.title}
               onChange={e => set('title', e.target.value)} required />
           </div>
-
-          {/* Category + Sub */}
           <div className="fg-row">
             <div className="fg">
               <label>Kategori *</label>
@@ -685,8 +703,6 @@ function AddPage({ authFetch, navigate }) {
               </select>
             </div>
           </div>
-
-          {/* City + Condition */}
           <div className="fg-row">
             <div className="fg">
               <label>Şehir *</label>
@@ -702,26 +718,18 @@ function AddPage({ authFetch, navigate }) {
               </select>
             </div>
           </div>
-
-          {/* Description */}
           <div className="fg">
             <label>Açıklama</label>
             <textarea placeholder="Ürün hakkında kısa bir açıklama..." value={form.desc}
               onChange={e => set('desc', e.target.value)} rows={3} />
           </div>
-
-          {/* Wishlist */}
           <div className="fg wish-fg">
             <label className="wish-label-main">🔄 Ne karşılığında takas istersin?</label>
-            <input
-              type="text"
+            <input type="text"
               placeholder="örn: Fizik kitabı, kutu oyunu, Steam kodu..."
-              value={form.wishlist}
-              onChange={e => set('wishlist', e.target.value)}
-            />
+              value={form.wishlist} onChange={e => set('wishlist', e.target.value)} />
             <span className="fg-hint">Swipe ekranında diğer kullanıcılara gösterilecek</span>
           </div>
-
           <button type="submit" className="btn-submit" disabled={loading}>
             {loading ? 'Yükleniyor...' : '🚀 İlanı Yayınla'}
           </button>
@@ -741,7 +749,6 @@ function MatchesPage({ authFetch, navigate, user }) {
   const [loading,     setLoading]     = useState(true);
   const bottomRef = useRef(null);
 
-  // Load match list
   useEffect(() => {
     authFetch('/api/matches')
       .then(r => r.json())
@@ -750,7 +757,6 @@ function MatchesPage({ authFetch, navigate, user }) {
       .finally(() => setLoading(false));
   }, [authFetch]);
 
-  // Poll messages for active match
   useEffect(() => {
     if (!activeMatch) return;
     const load = () =>
@@ -763,10 +769,7 @@ function MatchesPage({ authFetch, navigate, user }) {
     return () => clearInterval(t);
   }, [activeMatch, authFetch]);
 
-  // Auto-scroll
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   const sendMsg = async e => {
     e.preventDefault();
@@ -782,13 +785,9 @@ function MatchesPage({ authFetch, navigate, user }) {
     } catch {}
   };
 
-  const openMatch = m => { setActiveMatch(m); setMessages([]); };
+  if (loading) return <div className="loading-state"><div className="spinner" /><p>Yükleniyor...</p></div>;
 
-  if (loading) return (
-    <div className="loading-state"><div className="spinner" /><p>Yükleniyor...</p></div>
-  );
-
-  if (!loading && matches.length === 0) return (
+  if (matches.length === 0) return (
     <div className="matches-page">
       <div className="empty-state">
         <div className="es-icon">💬</div>
@@ -802,8 +801,6 @@ function MatchesPage({ authFetch, navigate, user }) {
   return (
     <div className="matches-page">
       <div className="matches-layout">
-
-        {/* ── Sidebar: match list ── */}
         <aside className={`matches-list ${activeMatch ? 'collapsed-mobile' : ''}`}>
           <div className="matches-list-head">
             <h3>Eşleşmeler</h3>
@@ -815,10 +812,9 @@ function MatchesPage({ authFetch, navigate, user }) {
             const myProd = isU1 ? m.product1_title : m.product2_title;
             const thProd = isU1 ? m.product2_title : m.product1_title;
             return (
-              <button
-                key={m.id}
+              <button key={m.id}
                 className={`match-item ${activeMatch?.id === m.id ? 'active' : ''}`}
-                onClick={() => openMatch(m)}
+                onClick={() => { setActiveMatch(m); setMessages([]); }}
               >
                 <div className="mi-av">{other?.[0]?.toUpperCase() || '?'}</div>
                 <div className="mi-info">
@@ -834,7 +830,6 @@ function MatchesPage({ authFetch, navigate, user }) {
           })}
         </aside>
 
-        {/* ── Chat room ── */}
         {activeMatch ? (
           <section className="chat-room">
             <div className="chat-header">
@@ -854,16 +849,10 @@ function MatchesPage({ authFetch, navigate, user }) {
                 </div>
               </div>
             </div>
-
             <div className="chat-messages">
-              {messages.length === 0 && (
-                <div className="chat-empty">👋 Sohbeti sen başlat!</div>
-              )}
+              {messages.length === 0 && <div className="chat-empty">👋 Sohbeti sen başlat!</div>}
               {messages.map(msg => (
-                <div
-                  key={msg.id}
-                  className={`chat-msg ${msg.sender_id === user?.id ? 'mine' : 'theirs'}`}
-                >
+                <div key={msg.id} className={`chat-msg ${msg.sender_id === user?.id ? 'mine' : 'theirs'}`}>
                   <div className="msg-bubble">{msg.content}</div>
                   <div className="msg-time">
                     {new Date(msg.created_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
@@ -872,14 +861,9 @@ function MatchesPage({ authFetch, navigate, user }) {
               ))}
               <div ref={bottomRef} />
             </div>
-
             <form className="chat-form" onSubmit={sendMsg}>
-              <input
-                type="text"
-                placeholder="Mesaj yaz..."
-                value={newMsg}
-                onChange={e => setNewMsg(e.target.value)}
-              />
+              <input type="text" placeholder="Mesaj yaz..." value={newMsg}
+                onChange={e => setNewMsg(e.target.value)} />
               <button type="submit" className="chat-send" disabled={!newMsg.trim()}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
@@ -893,8 +877,118 @@ function MatchesPage({ authFetch, navigate, user }) {
             <p>Bir eşleşme seç</p>
           </div>
         )}
-
       </div>
+    </div>
+  );
+}
+
+// ─── Admin Page ───────────────────────────────────────────────────────────────
+
+function AdminPage({ authFetch }) {
+  const [stats,    setStats]    = useState(null);
+  const [users,    setUsers]    = useState([]);
+  const [products, setProducts] = useState([]);
+  const [tab,      setTab]      = useState('overview');
+  const [loading,  setLoading]  = useState(true);
+
+  const loadData = useCallback(() => {
+    Promise.all([
+      authFetch('/api/admin/stats').then(r => r.json()),
+      authFetch('/api/admin/users').then(r => r.json()),
+      authFetch('/api/admin/products').then(r => r.json()),
+    ]).then(([s, u, p]) => {
+      setStats(s);
+      setUsers(Array.isArray(u) ? u : []);
+      setProducts(Array.isArray(p) ? p : []);
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, [authFetch]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const deleteProduct = async id => {
+    if (!confirm('Bu ilanı silmek istediğinden emin misin?')) return;
+    await authFetch(`/api/admin/products/${id}`, { method: 'DELETE' });
+    setProducts(p => p.filter(x => x.id !== id));
+  };
+
+  if (loading) return <div className="loading-state"><div className="spinner" /><p>Admin paneli yükleniyor...</p></div>;
+
+  return (
+    <div className="admin-page">
+      <div className="admin-header">
+        <div className="admin-badge">👑 Admin</div>
+        <h1>Yönetim Paneli</h1>
+        <p className="admin-sub">takaslık.app — Tam Yetki</p>
+      </div>
+
+      {stats && (
+        <div className="admin-stats">
+          <div className="astat"><span className="astat-num">{stats.users}</span><span>Kullanıcı</span></div>
+          <div className="astat"><span className="astat-num">{stats.products}</span><span>İlan</span></div>
+          <div className="astat"><span className="astat-num">{stats.matches}</span><span>Eşleşme</span></div>
+          <div className="astat"><span className="astat-num">{stats.messages}</span><span>Mesaj</span></div>
+        </div>
+      )}
+
+      <div className="admin-tabs">
+        <button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>Genel Bakış</button>
+        <button className={tab === 'users'    ? 'active' : ''} onClick={() => setTab('users')}>Kullanıcılar ({users.length})</button>
+        <button className={tab === 'products' ? 'active' : ''} onClick={() => setTab('products')}>İlanlar ({products.length})</button>
+      </div>
+
+      {tab === 'overview' && (
+        <div className="admin-section">
+          <h3>Son Kullanıcılar</h3>
+          <div className="admin-table">
+            {users.slice(0, 5).map(u => (
+              <div key={u.id} className="admin-row">
+                <span className="owner-av">{u.name?.[0]?.toUpperCase()}</span>
+                <span className="admin-row-main">{u.name}</span>
+                <span className="admin-row-sub">{u.email}</span>
+                <span className="admin-row-date">{new Date(u.created_at).toLocaleDateString('tr-TR')}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === 'users' && (
+        <div className="admin-section">
+          <h3>Tüm Kullanıcılar</h3>
+          <div className="admin-table">
+            {users.map(u => (
+              <div key={u.id} className="admin-row">
+                <span className="admin-row-id">#{u.id}</span>
+                <span className="owner-av">{u.name?.[0]?.toUpperCase()}</span>
+                <span className="admin-row-main">{u.name}</span>
+                <span className="admin-row-sub">{u.email}</span>
+                <span className="admin-row-date">{new Date(u.created_at).toLocaleDateString('tr-TR')}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === 'products' && (
+        <div className="admin-section">
+          <h3>Tüm İlanlar</h3>
+          <div className="admin-table">
+            {products.map(p => (
+              <div key={p.id} className="admin-row">
+                <span className="admin-row-id">#{p.id}</span>
+                <span className="admin-row-main">{p.title}</span>
+                <span className="admin-row-sub">{p.category} · {p.owner_name}</span>
+                <span className="admin-row-date">{new Date(p.created_at).toLocaleDateString('tr-TR')}</span>
+                <button className="admin-del" onClick={() => deleteProduct(p.id)} title="Sil">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                    <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -921,15 +1015,18 @@ function ProfilePage({ favorites, onFav, authFetch, navigate, user, onLogout }) 
       <div className="profile-header">
         <div className="profile-av">{displayName[0]?.toUpperCase()}</div>
         <div className="profile-info">
-          <h2>{displayName}</h2>
+          <div className="profile-name-row">
+            <h2>{displayName}</h2>
+            {user?.is_admin && <span className="admin-badge-sm">👑 Admin</span>}
+          </div>
           <p className="profile-sub">{user?.email}</p>
           <div className="profile-stats">
             <div className="stat"><strong>{myProducts.length}</strong><span>İlan</span></div>
             <div className="stat"><strong>{favorites.length}</strong><span>Favori</span></div>
           </div>
         </div>
-        <button className="logout-btn" onClick={onLogout} title="Çıkış yap">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+        <button className="logout-btn" onClick={onLogout}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
             <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
             <polyline points="16 17 21 12 16 7"/>
             <line x1="21" y1="12" x2="9" y2="12"/>
@@ -939,7 +1036,7 @@ function ProfilePage({ favorites, onFav, authFetch, navigate, user, onLogout }) 
       </div>
 
       <div className="profile-tabs">
-        <button className={tab === 'my' ? 'active' : ''} onClick={() => setTab('my')}>
+        <button className={tab === 'my'  ? 'active' : ''} onClick={() => setTab('my')}>
           İlanlarım ({myProducts.length})
         </button>
         <button className={tab === 'fav' ? 'active' : ''} onClick={() => setTab('fav')}>
@@ -948,38 +1045,33 @@ function ProfilePage({ favorites, onFav, authFetch, navigate, user, onLogout }) 
       </div>
 
       {tab === 'my' && (
-        loading ? (
-          <div className="loading-state"><div className="spinner" /><p>Yükleniyor...</p></div>
-        ) : myProducts.length === 0 ? (
-          <div className="empty-state">
-            <div className="es-icon">📦</div>
-            <h3>Henüz ilan yok</h3>
-            <p>İlk ürününü ekleyerek başla!</p>
-            <button className="btn-red" onClick={() => navigate('add')}>İlan Ekle</button>
-          </div>
-        ) : (
-          <div className="pgrid">
-            {myProducts.map(p => <ProductCard key={p.id} product={p} favorites={favorites} onFav={onFav} />)}
-          </div>
-        )
+        loading ? <div className="loading-state"><div className="spinner" /><p>Yükleniyor...</p></div>
+        : myProducts.length === 0
+          ? <div className="empty-state">
+              <div className="es-icon">📦</div>
+              <h3>Henüz ilan yok</h3>
+              <p>İlk ürününü ekleyerek başla!</p>
+              <button className="btn-red" onClick={() => navigate('add')}>İlan Ekle</button>
+            </div>
+          : <div className="pgrid">
+              {myProducts.map(p => <ProductCard key={p.id} product={p} favorites={favorites} onFav={onFav} />)}
+            </div>
       )}
 
       {tab === 'fav' && (
-        favorites.length === 0 ? (
-          <div className="empty-state">
-            <div className="es-icon">🤍</div>
-            <h3>Henüz favori yok</h3>
-            <p>Keşfet sayfasında ilanları favorile!</p>
-            <button className="btn-red" onClick={() => navigate('explore')}>Keşfete Git</button>
-          </div>
-        ) : (
-          <div className="empty-state">
-            <div className="es-icon">❤️</div>
-            <h3>{favorites.length} favori var</h3>
-            <p>Favorilediğin ilanları Keşfet sayfasında görebilirsin</p>
-            <button className="btn-red" onClick={() => navigate('explore')}>Keşfete Git</button>
-          </div>
-        )
+        favorites.length === 0
+          ? <div className="empty-state">
+              <div className="es-icon">🤍</div>
+              <h3>Henüz favori yok</h3>
+              <p>Keşfet sayfasında ilanları favorile!</p>
+              <button className="btn-red" onClick={() => navigate('explore')}>Keşfete Git</button>
+            </div>
+          : <div className="empty-state">
+              <div className="es-icon">❤️</div>
+              <h3>{favorites.length} favori var</h3>
+              <p>Keşfet sayfasında favorilediğin ilanları görebilirsin</p>
+              <button className="btn-red" onClick={() => navigate('explore')}>Keşfete Git</button>
+            </div>
       )}
     </div>
   );
@@ -992,13 +1084,11 @@ function AuthPage({ auth }) {
   const [form,    setForm]    = useState({ email: '', password: '', name: '' });
   const [error,   setError]   = useState('');
   const [loading, setLoading] = useState(false);
-
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   const handleSubmit = async e => {
     e.preventDefault();
-    setLoading(true);
-    setError('');
+    setLoading(true); setError('');
     const result = mode === 'login'
       ? await auth.login(form.email, form.password)
       : await auth.register(form.email, form.password, form.name);
@@ -1009,17 +1099,12 @@ function AuthPage({ auth }) {
   return (
     <div className="auth-page">
       <div className="auth-card">
-
-        {/* Brand */}
         <div className="auth-brand">
-          <div className="auth-logo-wrap">
-            <Logo />
-          </div>
+          <div className="auth-logo-wrap"><Logo /></div>
           <span className="auth-wordmark">takaslık</span>
         </div>
         <p className="auth-tagline">Ürünlerini takas et · Yeni şeyler keşfet</p>
 
-        {/* Title */}
         <h2 className="auth-title">
           {mode === 'login' ? 'Tekrar hoş geldin 👋' : 'Hemen başla'}
         </h2>
@@ -1042,8 +1127,7 @@ function AuthPage({ auth }) {
           <div className="fg">
             <label>E-posta</label>
             <input type="email" placeholder="ornek@mail.com" value={form.email}
-              onChange={e => set('email', e.target.value)} required
-              autoFocus={mode === 'login'} />
+              onChange={e => set('email', e.target.value)} required autoFocus={mode === 'login'} />
           </div>
           <div className="fg">
             <label>Şifre</label>
@@ -1056,11 +1140,10 @@ function AuthPage({ auth }) {
         </form>
 
         <div className="auth-switch">
-          {mode === 'login' ? (
-            <span>Hesabın yok mu? <button onClick={() => { setMode('register'); setError(''); }}>Kayıt Ol</button></span>
-          ) : (
-            <span>Hesabın var mı? <button onClick={() => { setMode('login'); setError(''); }}>Giriş Yap</button></span>
-          )}
+          {mode === 'login'
+            ? <span>Hesabın yok mu? <button onClick={() => { setMode('register'); setError(''); }}>Kayıt Ol</button></span>
+            : <span>Hesabın var mı? <button onClick={() => { setMode('login'); setError(''); }}>Giriş Yap</button></span>
+          }
         </div>
 
         {mode === 'login' && (
@@ -1081,94 +1164,105 @@ function AuthPage({ auth }) {
 
 // ─── App Root ─────────────────────────────────────────────────────────────────
 
-const NAV = [
-  {
-    id: 'explore', label: 'Keşfet',
-    icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>,
-  },
-  {
-    id: 'matches', label: 'Eşleşmeler',
-    icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>,
-  },
-  {
-    id: 'add', label: 'İlan Ekle',
-    icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>,
-  },
-  {
-    id: 'profile', label: 'Profil',
-    icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>,
-  },
-];
-
 export default function App() {
   const { page, navigate }        = useRouter();
   const [favorites, setFavorites] = useLS('takaslık_fav', []);
+  const [theme, setTheme]         = useLS('takas_theme', 'dark');
   const auth = useAuth();
+
+  // Apply theme to <html> and body background
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    document.documentElement.style.background = theme === 'dark' ? '#0C0C0E' : '#F5F5F5';
+  }, [theme]);
+
+  const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
 
   const toggleFav = useCallback(
     id => setFavorites(p => p.includes(id) ? p.filter(f => f !== id) : [...p, id]),
     [setFavorites]
   );
 
-  // Auth gate
-  if (!auth.isAuth) return <AuthPage auth={auth} />;
+  // Admin redirect on login
+  useEffect(() => {
+    if (auth.user?.is_admin && page === 'explore') {
+      // Don't force redirect, just let them navigate freely
+    }
+  }, [auth.user, page]);
+
+  if (!auth.isAuth) return (
+    <ThemeCtx.Provider value={theme}>
+      <AuthPage auth={auth} />
+    </ThemeCtx.Provider>
+  );
+
+  const isAdmin = auth.user?.is_admin;
+
+  const NAV = [
+    {
+      id: 'explore', label: 'Keşfet',
+      icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>,
+    },
+    {
+      id: 'matches', label: 'Eşleşmeler',
+      icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>,
+    },
+    {
+      id: 'add', label: 'İlan Ekle',
+      icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>,
+    },
+    ...(isAdmin ? [{
+      id: 'admin', label: 'Admin',
+      icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>,
+    }] : []),
+    {
+      id: 'profile', label: 'Profil',
+      icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>,
+    },
+  ];
 
   return (
-    <div className="app">
-      <header className="header">
-        <button className="logo-btn" onClick={() => navigate('explore')}>
-          <Logo />
-          <span className="logo-text">takaslık</span>
-        </button>
-        <nav className="nav">
+    <ThemeCtx.Provider value={theme}>
+      <div className="app">
+        <header className="header">
+          <button className="logo-btn" onClick={() => navigate('explore')}>
+            <Logo />
+            <span className="logo-text">takaslık</span>
+            {isAdmin && <span className="admin-dot" title="Admin" />}
+          </button>
+          <nav className="nav">
+            {NAV.map(n => (
+              <button key={n.id}
+                className={`nav-btn ${page === n.id ? 'active' : ''} ${n.id === 'admin' ? 'nav-admin' : ''}`}
+                onClick={() => navigate(n.id)}
+              >
+                {n.icon}<span>{n.label}</span>
+              </button>
+            ))}
+          </nav>
+          <ThemeToggle theme={theme} onToggle={toggleTheme} />
+        </header>
+
+        <main className="main">
+          {page === 'explore' && <ExplorePage favorites={favorites} onFav={toggleFav} authFetch={auth.authFetch} navigate={navigate} />}
+          {page === 'matches' && <MatchesPage authFetch={auth.authFetch} navigate={navigate} user={auth.user} />}
+          {page === 'add'     && <AddPage authFetch={auth.authFetch} navigate={navigate} />}
+          {page === 'admin'   && isAdmin && <AdminPage authFetch={auth.authFetch} />}
+          {page === 'admin'   && !isAdmin && <ExplorePage favorites={favorites} onFav={toggleFav} authFetch={auth.authFetch} navigate={navigate} />}
+          {page === 'profile' && <ProfilePage favorites={favorites} onFav={toggleFav} authFetch={auth.authFetch} navigate={navigate} user={auth.user} onLogout={auth.logout} />}
+        </main>
+
+        <nav className="bottom-nav">
           {NAV.map(n => (
-            <button
-              key={n.id}
-              className={`nav-btn ${page === n.id ? 'active' : ''}`}
+            <button key={n.id}
+              className={`bnav-btn ${page === n.id ? 'active' : ''}`}
               onClick={() => navigate(n.id)}
             >
-              {n.icon}
-              <span>{n.label}</span>
+              {n.icon}<span>{n.label}</span>
             </button>
           ))}
         </nav>
-      </header>
-
-      <main className="main">
-        {page === 'explore' && (
-          <ExplorePage favorites={favorites} onFav={toggleFav} authFetch={auth.authFetch} navigate={navigate} />
-        )}
-        {page === 'matches' && (
-          <MatchesPage authFetch={auth.authFetch} navigate={navigate} user={auth.user} />
-        )}
-        {page === 'add' && (
-          <AddPage authFetch={auth.authFetch} navigate={navigate} />
-        )}
-        {page === 'profile' && (
-          <ProfilePage
-            favorites={favorites}
-            onFav={toggleFav}
-            authFetch={auth.authFetch}
-            navigate={navigate}
-            user={auth.user}
-            onLogout={auth.logout}
-          />
-        )}
-      </main>
-
-      {/* Mobile bottom nav */}
-      <nav className="bottom-nav">
-        {NAV.map(n => (
-          <button
-            key={n.id}
-            className={`bnav-btn ${page === n.id ? 'active' : ''}`}
-            onClick={() => navigate(n.id)}
-          >
-            {n.icon}
-            <span>{n.label}</span>
-          </button>
-        ))}
-      </nav>
-    </div>
+      </div>
+    </ThemeCtx.Provider>
   );
 }
