@@ -1,10 +1,18 @@
 import { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
 import './App.css';
+import { auth, db } from './firebase';
+import {
+  createUserWithEmailAndPassword, signInWithEmailAndPassword,
+  signOut, onAuthStateChanged,
+} from 'firebase/auth';
+import {
+  collection, doc, addDoc, getDoc, getDocs, setDoc, deleteDoc,
+  query, where, orderBy, onSnapshot, serverTimestamp, getCountFromServer,
+} from 'firebase/firestore';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const API          = '';
-const ADMIN_EMAIL  = 'denizfurkan030@gmail.com';
+const ADMIN_EMAIL = 'denizfurkan030@gmail.com';
 
 const CITIES = ['İstanbul', 'Bursa', 'Tekirdağ', 'Edirne', 'Kırklareli', 'Kocaeli', 'Yalova'];
 
@@ -92,72 +100,86 @@ function useLS(key, init) {
   return [v, set];
 }
 
-// ─── Auth Hook ────────────────────────────────────────────────────────────────
+// ─── Firebase Auth Error Translator ──────────────────────────────────────────
+
+function authError(code) {
+  const map = {
+    'auth/email-already-in-use': 'Bu e-posta zaten kullanılıyor',
+    'auth/user-not-found':       'E-posta veya şifre hatalı',
+    'auth/wrong-password':       'E-posta veya şifre hatalı',
+    'auth/invalid-credential':   'E-posta veya şifre hatalı',
+    'auth/invalid-email':        'Geçersiz e-posta',
+    'auth/weak-password':        'Şifre en az 6 karakter olmalı',
+    'auth/too-many-requests':    'Çok fazla deneme. Lütfen bekle.',
+  };
+  return map[code] || 'Bir hata oluştu';
+}
+
+// ─── Auth Hook (Firebase) ─────────────────────────────────────────────────────
 
 function useAuth() {
-  const [token, setToken] = useLS('takas_tok',  null);
-  const [user,  setUser]  = useLS('takas_user', null);
+  const [user,    setUser]    = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (fbUser) => {
+      if (fbUser) {
+        const snap = await getDoc(doc(db, 'users', fbUser.uid));
+        const data = snap.exists() ? snap.data() : {};
+        setUser({
+          id:       fbUser.uid,
+          email:    fbUser.email,
+          name:     data.name || fbUser.email,
+          is_admin: fbUser.email === ADMIN_EMAIL,
+        });
+      } else {
+        setUser(null);
+      }
+      setLoading(false);
+    });
+    return unsub;
+  }, []);
 
   const login = async (email, password) => {
     try {
-      const r = await fetch(`${API}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-      const d = await r.json();
-      if (d.token) {
-        setToken(d.token);
-        setUser({ ...d.user, is_admin: email === ADMIN_EMAIL });
-        return { ok: true, is_admin: email === ADMIN_EMAIL };
-      }
-      return { ok: false, error: d.error || 'Giriş başarısız' };
-    } catch { return { ok: false, error: 'Sunucuya bağlanılamadı' }; }
+      await signInWithEmailAndPassword(auth, email, password);
+      return { ok: true };
+    } catch (err) { return { ok: false, error: authError(err.code) }; }
   };
 
   const register = async (email, password, name) => {
     try {
-      const r = await fetch(`${API}/api/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, name }),
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
+      await setDoc(doc(db, 'users', cred.user.uid), {
+        email: email.toLowerCase().trim(),
+        name:  name.trim(),
+        createdAt: serverTimestamp(),
       });
-      const d = await r.json();
-      if (d.token) {
-        setToken(d.token);
-        setUser({ ...d.user, is_admin: email === ADMIN_EMAIL });
-        return { ok: true, is_admin: email === ADMIN_EMAIL };
-      }
-      return { ok: false, error: d.error || 'Kayıt başarısız' };
-    } catch { return { ok: false, error: 'Sunucuya bağlanılamadı' }; }
+      return { ok: true };
+    } catch (err) { return { ok: false, error: authError(err.code) }; }
   };
 
-  const logout = () => { setToken(null); setUser(null); };
+  const logout = () => signOut(auth);
 
-  const authFetch = useCallback((path, opts = {}) => {
-    return fetch(`${API}${path}`, {
-      ...opts,
-      headers: { 'Authorization': `Bearer ${token}`, ...opts.headers },
-    });
-  }, [token]);
-
-  return { token, user, login, register, logout, isAuth: !!token, authFetch };
+  return { user, loading, login, register, logout, isAuth: !!user };
 }
 
-// ─── Normalize API Product ────────────────────────────────────────────────────
+// ─── Normalize Firestore Product ──────────────────────────────────────────────
 
 function normalize(p) {
   return {
     ...p,
-    image:     p.imageUrl || p.image_data || null,
-    city:      p.location   || p.city  || '',
+    image:     p.imageUrl || null,
+    city:      p.location || p.city || '',
     desc:      p.description || p.desc || '',
-    owner:     p.owner_name  || p.owner || '?',
-    price:     p.value       || 0,
+    owner:     p.ownerName || p.owner || '?',
+    price:     p.value || 0,
     priceType: 'takas',
     rating:    0,
-    sub:       p.sub         || '',
-    createdAt: p.created_at  ? new Date(p.created_at).getTime() : Date.now(),
+    sub:       p.sub || '',
+    createdAt: p.createdAt?.seconds
+      ? p.createdAt.seconds * 1000
+      : (p.createdAt ? new Date(p.createdAt).getTime() : Date.now()),
   };
 }
 
@@ -178,12 +200,8 @@ function Logo() {
 
 function ThemeToggle({ theme, onToggle }) {
   return (
-    <button
-      className="theme-toggle"
-      onClick={onToggle}
-      title={theme === 'dark' ? 'Açık temaya geç' : 'Koyu temaya geç'}
-      aria-label="Tema değiştir"
-    >
+    <button className="theme-toggle" onClick={onToggle}
+      title={theme === 'dark' ? 'Açık temaya geç' : 'Koyu temaya geç'} aria-label="Tema değiştir">
       {theme === 'dark' ? (
         <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 3a9 9 0 100 18A9 9 0 0012 3zm0 2a7 7 0 110 14A7 7 0 0112 5zm0 1a6 6 0 100 12A6 6 0 0012 6z"/>
@@ -216,18 +234,14 @@ function ProductCard({ product, favorites, onFav }) {
           ? <img src={product.image} alt={product.title} />
           : <span className="pcard-emoji">{cs.emoji}</span>
         }
-        <button
-          className={`fav-btn ${fav ? 'on' : ''}`}
-          onClick={e => { e.stopPropagation(); onFav(product.id); }}
-          aria-label="Favoriye ekle"
-        >
+        <button className={`fav-btn ${fav ? 'on' : ''}`}
+          onClick={e => { e.stopPropagation(); onFav(product.id); }} aria-label="Favoriye ekle">
           {fav ? '❤️' : '🤍'}
         </button>
         <span className="pcard-cat" style={{ background: cs.bg, color: cs.text }}>
           {cs.emoji} {product.category}
         </span>
       </div>
-
       <div className="pcard-body">
         <h3 className="pcard-title">{product.title}</h3>
         <div className="pcard-meta">
@@ -236,13 +250,9 @@ function ProductCard({ product, favorites, onFav }) {
         </div>
         <p className="pcard-desc">{product.desc}</p>
         {product.wishlist && (
-          <div className="pcard-wish">
-            <span className="wish-pill">🔄 {product.wishlist}</span>
-          </div>
+          <div className="pcard-wish"><span className="wish-pill">🔄 {product.wishlist}</span></div>
         )}
-        <div className="pcard-foot">
-          <span className="price-tag takas">🔄 Takas</span>
-        </div>
+        <div className="pcard-foot"><span className="price-tag takas">🔄 Takas</span></div>
         <div className="pcard-owner">
           <span className="owner-av">{product.owner[0]?.toUpperCase()}</span>
           <span className="owner-name">{product.owner}</span>
@@ -262,27 +272,21 @@ function SwipeCard({ product, onSwipe, isTop, zIndex, stackIndex, favorites, onF
   const cs  = useCAT(product.category);
   const fav = favorites.includes(product.id);
 
-  const getPos = e => {
-    const s = e.touches ? e.touches[0] : e;
-    return { x: s.clientX, y: s.clientY };
-  };
+  const getPos = e => { const s = e.touches ? e.touches[0] : e; return { x: s.clientX, y: s.clientY }; };
 
   const onStart = e => {
     if (!isTop || flying) return;
     startPos.current = getPos(e);
     setDrag({ x: 0, y: 0, active: true });
   };
-
   const onMove = e => {
     if (!drag.active || !startPos.current) return;
     const p = getPos(e);
     setDrag(d => ({ ...d, x: p.x - startPos.current.x, y: p.y - startPos.current.y }));
   };
-
   const onEnd = () => {
     if (!drag.active) return;
-    const THRESHOLD = 90;
-    if (Math.abs(drag.x) >= THRESHOLD) {
+    if (Math.abs(drag.x) >= 90) {
       const dir = drag.x > 0 ? 'right' : 'left';
       setFlying(dir);
       setTimeout(() => onSwipe(dir, product), 380);
@@ -295,38 +299,27 @@ function SwipeCard({ product, onSwipe, isTop, zIndex, stackIndex, favorites, onF
   const dx     = flying === 'right' ? 900 : flying === 'left' ? -900 : drag.x;
   const dy     = flying ? -80 : drag.y * 0.2;
   const rotate = flying === 'right' ? 28 : flying === 'left' ? -28 : drag.x * 0.07;
-
-  const topTransform   = `translate(${dx}px, ${dy}px) rotate(${rotate}deg)`;
-  const stackTransform = `scale(${1 - stackIndex * 0.045}) translateY(${stackIndex * 14}px)`;
-
   const likeOp = Math.min(1, Math.max(0,  drag.x / 80));
   const passOp = Math.min(1, Math.max(0, -drag.x / 80));
 
   return (
-    <div
-      className="sc"
-      style={{
+    <div className="sc" style={{
         zIndex,
-        transform: isTop ? topTransform : stackTransform,
-        transition: drag.active
-          ? 'none'
-          : flying
-            ? 'transform 0.38s cubic-bezier(0.55,0,1,0.45), opacity 0.38s ease'
-            : 'transform 0.42s cubic-bezier(0.175,0.885,0.32,1.275)',
-        opacity:       flying ? 0 : 1,
-        cursor:        isTop ? (drag.active ? 'grabbing' : 'grab') : 'default',
+        transform: isTop
+          ? `translate(${dx}px, ${dy}px) rotate(${rotate}deg)`
+          : `scale(${1 - stackIndex * 0.045}) translateY(${stackIndex * 14}px)`,
+        transition: drag.active ? 'none'
+          : flying ? 'transform 0.38s cubic-bezier(0.55,0,1,0.45), opacity 0.38s ease'
+          : 'transform 0.42s cubic-bezier(0.175,0.885,0.32,1.275)',
+        opacity: flying ? 0 : 1,
+        cursor: isTop ? (drag.active ? 'grabbing' : 'grab') : 'default',
         pointerEvents: isTop ? 'auto' : 'none',
       }}
       onMouseDown={onStart} onMouseMove={onMove} onMouseUp={onEnd} onMouseLeave={onEnd}
       onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd}
     >
-      <div className="sc-stamp sc-stamp-like" style={{ opacity: likeOp }}>
-        <span>❤</span> Teklif Ver
-      </div>
-      <div className="sc-stamp sc-stamp-pass" style={{ opacity: passOp }}>
-        <span>✕</span> Geç
-      </div>
-
+      <div className="sc-stamp sc-stamp-like" style={{ opacity: likeOp }}><span>❤</span> Teklif Ver</div>
+      <div className="sc-stamp sc-stamp-pass" style={{ opacity: passOp }}><span>✕</span> Geç</div>
       <div className="sc-img" style={{ background: cs.bg }}>
         {product.image
           ? <img src={product.image} alt={product.title} draggable="false" />
@@ -334,18 +327,12 @@ function SwipeCard({ product, onSwipe, isTop, zIndex, stackIndex, favorites, onF
         }
         <div className="sc-img-fade" />
         <div className="sc-img-top">
-          <span className="sc-cat" style={{ background: cs.bg, color: cs.text }}>
-            {cs.emoji} {product.category}
-          </span>
-          <button
-            className={`sc-fav ${fav ? 'on' : ''}`}
-            onClick={e => { e.stopPropagation(); onFav(product.id); }}
-          >
+          <span className="sc-cat" style={{ background: cs.bg, color: cs.text }}>{cs.emoji} {product.category}</span>
+          <button className={`sc-fav ${fav ? 'on' : ''}`} onClick={e => { e.stopPropagation(); onFav(product.id); }}>
             {fav ? '❤️' : '🤍'}
           </button>
         </div>
       </div>
-
       <div className="sc-body">
         <h3 className="sc-title">{product.title}</h3>
         <div className="sc-meta">
@@ -388,7 +375,7 @@ function MatchModal({ onClose, onGoChat }) {
 
 // ─── Swipe View ───────────────────────────────────────────────────────────────
 
-function SwipeView({ products, favorites, onFav, authFetch, navigate }) {
+function SwipeView({ products, favorites, onFav, user, navigate }) {
   const [gone,       setGone]       = useState(new Set());
   const [likedIds,   setLikedIds]   = useState([]);
   const [matchModal, setMatchModal] = useState(false);
@@ -398,70 +385,90 @@ function SwipeView({ products, favorites, onFav, authFetch, navigate }) {
 
   const handleSwipe = useCallback(async (dir, product) => {
     setGone(g => new Set([...g, product.id]));
-    if (dir === 'right') {
-      setLikedIds(l => [...l, product.id]);
-      try {
-        const r = await authFetch(`/api/like/${product.id}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({}),
-        });
-        const d = await r.json();
-        if (d.matched && !d.existing) setMatchModal(true);
-      } catch {}
-    }
-  }, [authFetch]);
+    if (dir !== 'right') return;
+    setLikedIds(l => [...l, product.id]);
 
-  const handleBtnSwipe = dir => {
-    if (!topThree.length) return;
-    handleSwipe(dir, topThree[0]);
-  };
+    try {
+      // 1. Record like with compound ID for O(1) mutual lookup
+      await setDoc(doc(db, 'likes', `${user.id}_${product.id}`), {
+        userId: user.id, productId: product.id, createdAt: serverTimestamp(),
+      });
+
+      // 2. Get my products to check mutual likes
+      const myProdsSnap = await getDocs(
+        query(collection(db, 'products'), where('userId', '==', user.id))
+      );
+
+      for (const myProd of myProdsSnap.docs) {
+        const mutualSnap = await getDoc(doc(db, 'likes', `${product.userId}_${myProd.id}`));
+        if (!mutualSnap.exists()) continue;
+
+        // 3. Check if match already exists
+        const existingSnap = await getDocs(
+          query(collection(db, 'matches'), where('participants', 'array-contains', user.id))
+        );
+        const alreadyMatched = existingSnap.docs.some(d => {
+          const p = d.data().participants;
+          return p.includes(user.id) && p.includes(product.userId);
+        });
+        if (alreadyMatched) return;
+
+        // 4. Get other user's name
+        const otherSnap = await getDoc(doc(db, 'users', product.userId));
+        const otherName = otherSnap.exists() ? otherSnap.data().name : '?';
+
+        // 5. Create match with denormalized data for fast listing
+        await addDoc(collection(db, 'matches'), {
+          participants:   [user.id, product.userId],
+          user1Id:        user.id,
+          user1Name:      user.name,
+          user2Id:        product.userId,
+          user2Name:      otherName,
+          product1Id:     product.id,
+          product1Title:  product.title,
+          product2Id:     myProd.id,
+          product2Title:  myProd.data().title,
+          createdAt:      serverTimestamp(),
+        });
+        setMatchModal(true);
+        return;
+      }
+    } catch (err) {
+      console.error('Like error:', err);
+    }
+  }, [user]);
+
+  const handleBtnSwipe = dir => { if (topThree.length) handleSwipe(dir, topThree[0]); };
 
   if (topThree.length === 0) return (
     <div className="swipe-done">
       <div className="sd-icon">🎉</div>
       <h3>Hepsi bitti!</h3>
       <p>{likedIds.length > 0 ? `${likedIds.length} ürüne takas teklifi verdin.` : 'Tüm ilanları gördün.'}</p>
-      <button className="btn-red" onClick={() => { setGone(new Set()); setLikedIds([]); }}>
-        Yeniden Başla
-      </button>
+      <button className="btn-red" onClick={() => { setGone(new Set()); setLikedIds([]); }}>Yeniden Başla</button>
     </div>
   );
 
   return (
     <>
       {matchModal && (
-        <MatchModal
-          onClose={() => setMatchModal(false)}
-          onGoChat={() => { setMatchModal(false); navigate('matches'); }}
-        />
+        <MatchModal onClose={() => setMatchModal(false)} onGoChat={() => { setMatchModal(false); navigate('matches'); }} />
       )}
       <div className="swipe-view">
         <div className="swipe-progress">
           <span>{remaining.length} ilan kaldı</span>
-          {likedIds.length > 0 && (
-            <span className="swipe-liked-count">❤ {likedIds.length} teklif</span>
-          )}
+          {likedIds.length > 0 && <span className="swipe-liked-count">❤ {likedIds.length} teklif</span>}
         </div>
-
         <div className="swipe-stack">
           {[...topThree].reverse().map((product, revIdx) => {
             const stackIdx = topThree.length - 1 - revIdx;
             return (
-              <SwipeCard
-                key={product.id}
-                product={product}
-                onSwipe={handleSwipe}
-                isTop={stackIdx === 0}
-                zIndex={topThree.length - stackIdx}
-                stackIndex={stackIdx}
-                favorites={favorites}
-                onFav={onFav}
-              />
+              <SwipeCard key={product.id} product={product} onSwipe={handleSwipe}
+                isTop={stackIdx === 0} zIndex={topThree.length - stackIdx}
+                stackIndex={stackIdx} favorites={favorites} onFav={onFav} />
             );
           })}
         </div>
-
         <div className="swipe-actions">
           <button className="swipe-btn pass" onClick={() => handleBtnSwipe('left')} title="Geç">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
@@ -474,11 +481,7 @@ function SwipeView({ products, favorites, onFav, authFetch, navigate }) {
             </svg>
           </button>
         </div>
-
-        <div className="swipe-hint">
-          <span>← geç</span>
-          <span>takas teklif et →</span>
-        </div>
+        <div className="swipe-hint"><span>← geç</span><span>takas teklif et →</span></div>
       </div>
     </>
   );
@@ -493,12 +496,8 @@ function FilterBar({ f, set }) {
     <div className="filter-bar">
       <div className="filter-search">
         <span className="search-ico">🔍</span>
-        <input
-          type="text"
-          placeholder="Ürün, not, ders ara..."
-          value={f.q}
-          onChange={e => set({ ...f, q: e.target.value })}
-        />
+        <input type="text" placeholder="Ürün, not, ders ara..." value={f.q}
+          onChange={e => set({ ...f, q: e.target.value })} />
         {f.q && <button className="search-clear" onClick={() => set({ ...f, q: '' })}>✕</button>}
       </div>
       <div className="filter-selects">
@@ -523,7 +522,7 @@ function FilterBar({ f, set }) {
 
 const EMPTY_F = { q: '', cat: '', city: '', sort: 'new' };
 
-function ExplorePage({ favorites, onFav, authFetch, navigate }) {
+function ExplorePage({ favorites, onFav, user, navigate }) {
   const theme = useContext(ThemeCtx);
   const [mode,     setMode]     = useState('swipe');
   const [products, setProducts] = useState([]);
@@ -531,13 +530,19 @@ function ExplorePage({ favorites, onFav, authFetch, navigate }) {
   const [f, setF]               = useState(EMPTY_F);
 
   useEffect(() => {
+    if (!user) return;
     setLoading(true);
-    authFetch('/api/products')
-      .then(r => r.json())
-      .then(data => setProducts(Array.isArray(data) ? data.map(normalize) : []))
-      .catch(() => {})
+    const q = query(collection(db, 'products'), orderBy('createdAt', 'desc'));
+    getDocs(q)
+      .then(snap => {
+        const list = snap.docs
+          .filter(d => d.data().userId !== user.id)
+          .map(d => normalize({ id: d.id, ...d.data() }));
+        setProducts(list);
+      })
+      .catch(console.error)
       .finally(() => setLoading(false));
-  }, [authFetch]);
+  }, [user]);
 
   let list = products.filter(p => {
     const ql = f.q.toLowerCase();
@@ -546,10 +551,9 @@ function ExplorePage({ favorites, onFav, authFetch, navigate }) {
     if (f.city && p.city     !== f.city) return false;
     return true;
   });
-  list = [...list].sort((a, b) => {
-    if (f.sort === 'az') return a.title.localeCompare(b.title);
-    return (b.createdAt || 0) - (a.createdAt || 0);
-  });
+  list = [...list].sort((a, b) =>
+    f.sort === 'az' ? a.title.localeCompare(b.title) : (b.createdAt || 0) - (a.createdAt || 0)
+  );
 
   const catStyles = CAT[theme];
 
@@ -574,21 +578,16 @@ function ExplorePage({ favorites, onFav, authFetch, navigate }) {
       {loading ? (
         <div className="loading-state"><div className="spinner" /><p>Yükleniyor...</p></div>
       ) : mode === 'swipe' ? (
-        <SwipeView products={list} favorites={favorites} onFav={onFav} authFetch={authFetch} navigate={navigate} />
+        <SwipeView products={list} favorites={favorites} onFav={onFav} user={user} navigate={navigate} />
       ) : (
         <>
           <FilterBar f={f} set={setF} />
           <div className="cat-pills">
-            <button className={`pill ${!f.cat ? 'active' : ''}`} onClick={() => setF({ ...f, cat: '' })}>
-              Tümü
-            </button>
+            <button className={`pill ${!f.cat ? 'active' : ''}`} onClick={() => setF({ ...f, cat: '' })}>Tümü</button>
             {Object.entries(catStyles).map(([name, s]) => (
-              <button
-                key={name}
-                className={`pill ${f.cat === name ? 'active' : ''}`}
+              <button key={name} className={`pill ${f.cat === name ? 'active' : ''}`}
                 onClick={() => setF({ ...f, cat: f.cat === name ? '' : name })}
-                style={f.cat === name ? { background: s.bg, color: s.text, borderColor: s.border } : {}}
-              >
+                style={f.cat === name ? { background: s.bg, color: s.text, borderColor: s.border } : {}}>
                 {s.emoji} {name}
               </button>
             ))}
@@ -621,36 +620,35 @@ function ExplorePage({ favorites, onFav, authFetch, navigate }) {
 
 const EMPTY_FORM = { title: '', category: '', sub: '', city: '', condition: 'İyi', desc: '', wishlist: '' };
 
-function AddPage({ authFetch, navigate }) {
-  const [form,      setForm]      = useState(EMPTY_FORM);
-  const [imageFile, setImageFile] = useState(null);
-  const [preview,   setPreview]   = useState(null);
-  const [loading,   setLoading]   = useState(false);
-  const [error,     setError]     = useState('');
-  const [done,      setDone]      = useState(false);
+function AddPage({ user, navigate }) {
+  const [form,    setForm]    = useState(EMPTY_FORM);
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState('');
+  const [done,    setDone]    = useState(false);
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
-
-  const handleImg = e => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setImageFile(file);
-    const r = new FileReader();
-    r.onload = ev => setPreview(ev.target.result);
-    r.readAsDataURL(file);
-  };
 
   const handleSubmit = async e => {
     e.preventDefault();
     setLoading(true); setError('');
     try {
-      const fd = new FormData();
-      Object.entries(form).forEach(([k, v]) => fd.append(k, v));
-      if (imageFile) fd.append('image', imageFile);
-      const r = await authFetch('/api/products', { method: 'POST', body: fd });
-      const d = await r.json();
-      if (d.id || d._id) { setDone(true); setTimeout(() => navigate('explore'), 1600); }
-      else setError(d.error || 'Bir hata oluştu');
-    } catch { setError('Sunucuya bağlanılamadı'); }
+      const ref = await addDoc(collection(db, 'products'), {
+        userId:      user.id,
+        ownerName:   user.name,
+        title:       form.title.trim(),
+        description: form.desc.trim(),
+        category:    form.category,
+        condition:   form.condition,
+        location:    form.city,
+        wishlist:    form.wishlist.trim(),
+        imageUrl:    null, // TODO: Firebase Storage
+        value:       0,
+        createdAt:   serverTimestamp(),
+      });
+      if (ref.id) { setDone(true); setTimeout(() => navigate('explore'), 1600); }
+      else setError('Bir hata oluştu');
+    } catch (err) {
+      setError(err.message || 'Sunucu hatası');
+    }
     setLoading(false);
   };
 
@@ -672,16 +670,6 @@ function AddPage({ authFetch, navigate }) {
         {error && <div className="form-error">{error}</div>}
         <form onSubmit={handleSubmit} className="add-form">
           <div className="fg">
-            <label>Fotoğraf</label>
-            <label className="upload-box">
-              <input type="file" accept="image/*" onChange={handleImg} />
-              {preview
-                ? <img src={preview} alt="önizleme" className="img-prev" />
-                : <div className="upload-ph"><span>📷</span><span>Fotoğraf ekle (opsiyonel)</span></div>
-              }
-            </label>
-          </div>
-          <div className="fg">
             <label>Başlık *</label>
             <input type="text" placeholder="Ürün adı" value={form.title}
               onChange={e => set('title', e.target.value)} required />
@@ -689,8 +677,7 @@ function AddPage({ authFetch, navigate }) {
           <div className="fg-row">
             <div className="fg">
               <label>Kategori *</label>
-              <select value={form.category}
-                onChange={e => { set('category', e.target.value); set('sub', ''); }} required>
+              <select value={form.category} onChange={e => { set('category', e.target.value); set('sub', ''); }} required>
                 <option value="">Seçin</option>
                 {Object.keys(CATEGORIES).map(c => <option key={c}>{c}</option>)}
               </select>
@@ -725,8 +712,7 @@ function AddPage({ authFetch, navigate }) {
           </div>
           <div className="fg wish-fg">
             <label className="wish-label-main">🔄 Ne karşılığında takas istersin?</label>
-            <input type="text"
-              placeholder="örn: Fizik kitabı, kutu oyunu, Steam kodu..."
+            <input type="text" placeholder="örn: Fizik kitabı, kutu oyunu, Steam kodu..."
               value={form.wishlist} onChange={e => set('wishlist', e.target.value)} />
             <span className="fg-hint">Swipe ekranında diğer kullanıcılara gösterilecek</span>
           </div>
@@ -741,7 +727,7 @@ function AddPage({ authFetch, navigate }) {
 
 // ─── Matches Page ─────────────────────────────────────────────────────────────
 
-function MatchesPage({ authFetch, navigate, user }) {
+function MatchesPage({ user, navigate }) {
   const [matches,     setMatches]     = useState([]);
   const [activeMatch, setActiveMatch] = useState(null);
   const [messages,    setMessages]    = useState([]);
@@ -749,25 +735,34 @@ function MatchesPage({ authFetch, navigate, user }) {
   const [loading,     setLoading]     = useState(true);
   const bottomRef = useRef(null);
 
+  // Load matches (user can be user1 or user2)
   useEffect(() => {
-    authFetch('/api/matches')
-      .then(r => r.json())
-      .then(data => setMatches(Array.isArray(data) ? data : []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [authFetch]);
+    if (!user) return;
+    const q = query(
+      collection(db, 'matches'),
+      where('participants', 'array-contains', user.id),
+      orderBy('createdAt', 'desc')
+    );
+    const unsub = onSnapshot(q, snap => {
+      setMatches(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+    });
+    return unsub;
+  }, [user]);
 
+  // Real-time messages — Firebase superpower vs old polling
   useEffect(() => {
     if (!activeMatch) return;
-    const load = () =>
-      authFetch(`/api/matches/${activeMatch.id}/messages`)
-        .then(r => r.json())
-        .then(data => { if (Array.isArray(data)) setMessages(data); })
-        .catch(() => {});
-    load();
-    const t = setInterval(load, 3000);
-    return () => clearInterval(t);
-  }, [activeMatch, authFetch]);
+    const q = query(
+      collection(db, 'messages'),
+      where('matchId', '==', activeMatch.id),
+      orderBy('createdAt', 'asc')
+    );
+    const unsub = onSnapshot(q, snap => {
+      setMessages(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return unsub;
+  }, [activeMatch]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
@@ -777,12 +772,13 @@ function MatchesPage({ authFetch, navigate, user }) {
     const content = newMsg.trim();
     setNewMsg('');
     try {
-      await authFetch(`/api/matches/${activeMatch.id}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
+      await addDoc(collection(db, 'messages'), {
+        matchId:   activeMatch.id,
+        senderId:  user.id,
+        content,
+        createdAt: serverTimestamp(),
       });
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   if (loading) return <div className="loading-state"><div className="spinner" /><p>Yükleniyor...</p></div>;
@@ -807,10 +803,10 @@ function MatchesPage({ authFetch, navigate, user }) {
             <span className="match-count-badge">{matches.length}</span>
           </div>
           {matches.map(m => {
-            const isU1   = m.user1_id === user?.id;
-            const other  = isU1 ? m.user2_name  : m.user1_name;
-            const myProd = isU1 ? m.product1_title : m.product2_title;
-            const thProd = isU1 ? m.product2_title : m.product1_title;
+            const isU1   = m.user1Id === user?.id;
+            const other  = isU1 ? m.user2Name  : m.user1Name;
+            const myProd = isU1 ? m.product1Title : m.product2Title;
+            const thProd = isU1 ? m.product2Title : m.product1Title;
             return (
               <button key={m.id}
                 className={`match-item ${activeMatch?.id === m.id ? 'active' : ''}`}
@@ -840,22 +836,24 @@ function MatchesPage({ authFetch, navigate, user }) {
               </button>
               <div className="chat-header-info">
                 <div className="chat-other-name">
-                  {activeMatch.user1_id === user?.id ? activeMatch.user2_name : activeMatch.user1_name}
+                  {activeMatch.user1Id === user?.id ? activeMatch.user2Name : activeMatch.user1Name}
                 </div>
                 <div className="chat-swap-label">
-                  {activeMatch.user1_id === user?.id ? activeMatch.product1_title : activeMatch.product2_title}
+                  {activeMatch.user1Id === user?.id ? activeMatch.product1Title : activeMatch.product2Title}
                   {' ⇄ '}
-                  {activeMatch.user1_id === user?.id ? activeMatch.product2_title : activeMatch.product1_title}
+                  {activeMatch.user1Id === user?.id ? activeMatch.product2Title : activeMatch.product1Title}
                 </div>
               </div>
             </div>
             <div className="chat-messages">
               {messages.length === 0 && <div className="chat-empty">👋 Sohbeti sen başlat!</div>}
               {messages.map(msg => (
-                <div key={msg.id} className={`chat-msg ${msg.sender_id === user?.id ? 'mine' : 'theirs'}`}>
+                <div key={msg.id} className={`chat-msg ${msg.senderId === user?.id ? 'mine' : 'theirs'}`}>
                   <div className="msg-bubble">{msg.content}</div>
                   <div className="msg-time">
-                    {new Date(msg.created_at || msg.createdAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                    {msg.createdAt?.toDate
+                      ? msg.createdAt.toDate().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
+                      : ''}
                   </div>
                 </div>
               ))}
@@ -884,30 +882,43 @@ function MatchesPage({ authFetch, navigate, user }) {
 
 // ─── Admin Page ───────────────────────────────────────────────────────────────
 
-function AdminPage({ authFetch }) {
+function AdminPage() {
   const [stats,    setStats]    = useState(null);
   const [users,    setUsers]    = useState([]);
   const [products, setProducts] = useState([]);
   const [tab,      setTab]      = useState('overview');
   const [loading,  setLoading]  = useState(true);
 
-  const loadData = useCallback(() => {
-    Promise.all([
-      authFetch('/api/admin/stats').then(r => r.json()),
-      authFetch('/api/admin/users').then(r => r.json()),
-      authFetch('/api/admin/products').then(r => r.json()),
-    ]).then(([s, u, p]) => {
-      setStats(s);
-      setUsers(Array.isArray(u) ? u : []);
-      setProducts(Array.isArray(p) ? p : []);
-    }).catch(() => {}).finally(() => setLoading(false));
-  }, [authFetch]);
+  const loadData = useCallback(async () => {
+    try {
+      const [uc, pc, mc, msgc] = await Promise.all([
+        getCountFromServer(collection(db, 'users')),
+        getCountFromServer(collection(db, 'products')),
+        getCountFromServer(collection(db, 'matches')),
+        getCountFromServer(collection(db, 'messages')),
+      ]);
+      setStats({
+        users:    uc.data().count,
+        products: pc.data().count,
+        matches:  mc.data().count,
+        messages: msgc.data().count,
+      });
+
+      const [uSnap, pSnap] = await Promise.all([
+        getDocs(query(collection(db, 'users'),    orderBy('createdAt', 'desc'))),
+        getDocs(query(collection(db, 'products'), orderBy('createdAt', 'desc'))),
+      ]);
+      setUsers(uSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setProducts(pSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
+  }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
 
   const deleteProduct = async id => {
     if (!confirm('Bu ilanı silmek istediğinden emin misin?')) return;
-    await authFetch(`/api/admin/products/${id}`, { method: 'DELETE' });
+    await deleteDoc(doc(db, 'products', id));
     setProducts(p => p.filter(x => x.id !== id));
   };
 
@@ -945,7 +956,9 @@ function AdminPage({ authFetch }) {
                 <span className="owner-av">{u.name?.[0]?.toUpperCase()}</span>
                 <span className="admin-row-main">{u.name}</span>
                 <span className="admin-row-sub">{u.email}</span>
-                <span className="admin-row-date">{new Date(u.created_at).toLocaleDateString('tr-TR')}</span>
+                <span className="admin-row-date">
+                  {u.createdAt?.toDate ? u.createdAt.toDate().toLocaleDateString('tr-TR') : ''}
+                </span>
               </div>
             ))}
           </div>
@@ -958,11 +971,12 @@ function AdminPage({ authFetch }) {
           <div className="admin-table">
             {users.map(u => (
               <div key={u.id} className="admin-row">
-                <span className="admin-row-id">#{u.id}</span>
                 <span className="owner-av">{u.name?.[0]?.toUpperCase()}</span>
                 <span className="admin-row-main">{u.name}</span>
                 <span className="admin-row-sub">{u.email}</span>
-                <span className="admin-row-date">{new Date(u.created_at).toLocaleDateString('tr-TR')}</span>
+                <span className="admin-row-date">
+                  {u.createdAt?.toDate ? u.createdAt.toDate().toLocaleDateString('tr-TR') : ''}
+                </span>
               </div>
             ))}
           </div>
@@ -975,13 +989,15 @@ function AdminPage({ authFetch }) {
           <div className="admin-table">
             {products.map(p => (
               <div key={p.id} className="admin-row">
-                <span className="admin-row-id">#{p.id}</span>
                 <span className="admin-row-main">{p.title}</span>
-                <span className="admin-row-sub">{p.category} · {p.owner_name}</span>
-                <span className="admin-row-date">{new Date(p.created_at).toLocaleDateString('tr-TR')}</span>
+                <span className="admin-row-sub">{p.category} · {p.ownerName}</span>
+                <span className="admin-row-date">
+                  {p.createdAt?.toDate ? p.createdAt.toDate().toLocaleDateString('tr-TR') : ''}
+                </span>
                 <button className="admin-del" onClick={() => deleteProduct(p.id)} title="Sil">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-                    <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+                    <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
+                    <path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
                   </svg>
                 </button>
               </div>
@@ -995,18 +1011,19 @@ function AdminPage({ authFetch }) {
 
 // ─── Profile Page ─────────────────────────────────────────────────────────────
 
-function ProfilePage({ favorites, onFav, authFetch, navigate, user, onLogout }) {
+function ProfilePage({ favorites, onFav, navigate, user, onLogout }) {
   const [tab,        setTab]        = useState('my');
   const [myProducts, setMyProducts] = useState([]);
   const [loading,    setLoading]    = useState(true);
 
   useEffect(() => {
-    authFetch('/api/my-products')
-      .then(r => r.json())
-      .then(data => setMyProducts(Array.isArray(data) ? data.map(normalize) : []))
-      .catch(() => {})
+    if (!user) return;
+    const q = query(collection(db, 'products'), where('userId', '==', user.id), orderBy('createdAt', 'desc'));
+    getDocs(q)
+      .then(snap => setMyProducts(snap.docs.map(d => normalize({ id: d.id, ...d.data() }))))
+      .catch(console.error)
       .finally(() => setLoading(false));
-  }, [authFetch]);
+  }, [user]);
 
   const displayName = user?.name || 'Kullanıcı';
 
@@ -1036,26 +1053,23 @@ function ProfilePage({ favorites, onFav, authFetch, navigate, user, onLogout }) 
       </div>
 
       <div className="profile-tabs">
-        <button className={tab === 'my'  ? 'active' : ''} onClick={() => setTab('my')}>
-          İlanlarım ({myProducts.length})
-        </button>
-        <button className={tab === 'fav' ? 'active' : ''} onClick={() => setTab('fav')}>
-          Favorilerim ({favorites.length})
-        </button>
+        <button className={tab === 'my'  ? 'active' : ''} onClick={() => setTab('my')}>İlanlarım ({myProducts.length})</button>
+        <button className={tab === 'fav' ? 'active' : ''} onClick={() => setTab('fav')}>Favorilerim ({favorites.length})</button>
       </div>
 
       {tab === 'my' && (
-        loading ? <div className="loading-state"><div className="spinner" /><p>Yükleniyor...</p></div>
-        : myProducts.length === 0
-          ? <div className="empty-state">
-              <div className="es-icon">📦</div>
-              <h3>Henüz ilan yok</h3>
-              <p>İlk ürününü ekleyerek başla!</p>
-              <button className="btn-red" onClick={() => navigate('add')}>İlan Ekle</button>
-            </div>
-          : <div className="pgrid">
-              {myProducts.map(p => <ProductCard key={p.id} product={p} favorites={favorites} onFav={onFav} />)}
-            </div>
+        loading
+          ? <div className="loading-state"><div className="spinner" /><p>Yükleniyor...</p></div>
+          : myProducts.length === 0
+            ? <div className="empty-state">
+                <div className="es-icon">📦</div>
+                <h3>Henüz ilan yok</h3>
+                <p>İlk ürününü ekleyerek başla!</p>
+                <button className="btn-red" onClick={() => navigate('add')}>İlan Ekle</button>
+              </div>
+            : <div className="pgrid">
+                {myProducts.map(p => <ProductCard key={p.id} product={p} favorites={favorites} onFav={onFav} />)}
+              </div>
       )}
 
       {tab === 'fav' && (
@@ -1079,7 +1093,7 @@ function ProfilePage({ favorites, onFav, authFetch, navigate, user, onLogout }) 
 
 // ─── Auth Page ────────────────────────────────────────────────────────────────
 
-function AuthPage({ auth }) {
+function AuthPage({ authHook }) {
   const [mode,    setMode]    = useState('login');
   const [form,    setForm]    = useState({ email: '', password: '', name: '' });
   const [error,   setError]   = useState('');
@@ -1090,8 +1104,8 @@ function AuthPage({ auth }) {
     e.preventDefault();
     setLoading(true); setError('');
     const result = mode === 'login'
-      ? await auth.login(form.email, form.password)
-      : await auth.register(form.email, form.password, form.name);
+      ? await authHook.login(form.email, form.password)
+      : await authHook.register(form.email, form.password, form.name);
     if (!result.ok) setError(result.error);
     setLoading(false);
   };
@@ -1145,18 +1159,6 @@ function AuthPage({ auth }) {
             : <span>Hesabın var mı? <button onClick={() => { setMode('login'); setError(''); }}>Giriş Yap</button></span>
           }
         </div>
-
-        {mode === 'login' && (
-          <>
-            <div className="auth-divider"><span>ya da</span></div>
-            <div className="auth-demo">
-              <span>Demo hesapla dene →</span>
-              <button onClick={() => setForm({ email: 'demo@takas.com', password: 'demo123', name: '' })}>
-                demo@takas.com / demo123
-              </button>
-            </div>
-          </>
-        )}
       </div>
     </div>
   );
@@ -1168,35 +1170,40 @@ export default function App() {
   const { page, navigate }        = useRouter();
   const [favorites, setFavorites] = useLS('takaslık_fav', []);
   const [theme, setTheme]         = useLS('takas_theme', 'dark');
-  const auth = useAuth();
+  const authHook = useAuth();
 
-  // Apply theme to <html> and body background
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     document.documentElement.style.background = theme === 'dark' ? '#0C0C0E' : '#F5F5F5';
   }, [theme]);
 
   const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
-
-  const toggleFav = useCallback(
+  const toggleFav   = useCallback(
     id => setFavorites(p => p.includes(id) ? p.filter(f => f !== id) : [...p, id]),
     [setFavorites]
   );
 
-  // Admin redirect on login
-  useEffect(() => {
-    if (auth.user?.is_admin && page === 'explore') {
-      // Don't force redirect, just let them navigate freely
-    }
-  }, [auth.user, page]);
+  // Firebase auth check — show spinner until resolved
+  if (authHook.loading) {
+    return (
+      <ThemeCtx.Provider value={theme}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
+          <div className="spinner" />
+        </div>
+      </ThemeCtx.Provider>
+    );
+  }
 
-  if (!auth.isAuth) return (
-    <ThemeCtx.Provider value={theme}>
-      <AuthPage auth={auth} />
-    </ThemeCtx.Provider>
-  );
+  if (!authHook.isAuth) {
+    return (
+      <ThemeCtx.Provider value={theme}>
+        <AuthPage authHook={authHook} />
+      </ThemeCtx.Provider>
+    );
+  }
 
-  const isAdmin = auth.user?.is_admin;
+  const { user } = authHook;
+  const isAdmin  = user?.is_admin;
 
   const NAV = [
     {
@@ -1244,20 +1251,17 @@ export default function App() {
         </header>
 
         <main className="main">
-          {page === 'explore' && <ExplorePage favorites={favorites} onFav={toggleFav} authFetch={auth.authFetch} navigate={navigate} />}
-          {page === 'matches' && <MatchesPage authFetch={auth.authFetch} navigate={navigate} user={auth.user} />}
-          {page === 'add'     && <AddPage authFetch={auth.authFetch} navigate={navigate} />}
-          {page === 'admin'   && isAdmin && <AdminPage authFetch={auth.authFetch} />}
-          {page === 'admin'   && !isAdmin && <ExplorePage favorites={favorites} onFav={toggleFav} authFetch={auth.authFetch} navigate={navigate} />}
-          {page === 'profile' && <ProfilePage favorites={favorites} onFav={toggleFav} authFetch={auth.authFetch} navigate={navigate} user={auth.user} onLogout={auth.logout} />}
+          {page === 'explore' && <ExplorePage favorites={favorites} onFav={toggleFav} user={user} navigate={navigate} />}
+          {page === 'matches' && <MatchesPage user={user} navigate={navigate} />}
+          {page === 'add'     && <AddPage user={user} navigate={navigate} />}
+          {page === 'admin'   && isAdmin  && <AdminPage />}
+          {page === 'admin'   && !isAdmin && <ExplorePage favorites={favorites} onFav={toggleFav} user={user} navigate={navigate} />}
+          {page === 'profile' && <ProfilePage favorites={favorites} onFav={toggleFav} navigate={navigate} user={user} onLogout={authHook.logout} />}
         </main>
 
         <nav className="bottom-nav">
           {NAV.map(n => (
-            <button key={n.id}
-              className={`bnav-btn ${page === n.id ? 'active' : ''}`}
-              onClick={() => navigate(n.id)}
-            >
+            <button key={n.id} className={`bnav-btn ${page === n.id ? 'active' : ''}`} onClick={() => navigate(n.id)}>
               {n.icon}<span>{n.label}</span>
             </button>
           ))}
