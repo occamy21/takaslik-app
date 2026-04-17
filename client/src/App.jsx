@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
 import './App.css';
-import { auth, db } from './firebase';
+import { auth, db, storage } from './firebase';
 import {
   createUserWithEmailAndPassword, signInWithEmailAndPassword,
   signOut, onAuthStateChanged,
@@ -9,6 +9,7 @@ import {
   collection, doc, addDoc, getDoc, getDocs, setDoc, deleteDoc,
   query, where, orderBy, onSnapshot, serverTimestamp, getCountFromServer,
 } from 'firebase/firestore';
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -522,27 +523,13 @@ function FilterBar({ f, set }) {
 
 const EMPTY_F = { q: '', cat: '', city: '', sort: 'new' };
 
-function ExplorePage({ favorites, onFav, user, navigate }) {
+function ExplorePage({ favorites, onFav, user, navigate, allProducts, productsLoading }) {
   const theme = useContext(ThemeCtx);
-  const [mode,     setMode]     = useState('swipe');
-  const [products, setProducts] = useState([]);
-  const [loading,  setLoading]  = useState(true);
-  const [f, setF]               = useState(EMPTY_F);
+  const [mode, setMode] = useState('swipe');
+  const [f, setF]       = useState(EMPTY_F);
 
-  useEffect(() => {
-    if (!user) return;
-    setLoading(true);
-    const q = query(collection(db, 'products'), orderBy('createdAt', 'desc'));
-    getDocs(q)
-      .then(snap => {
-        const list = snap.docs
-          .filter(d => d.data().userId !== user.id)
-          .map(d => normalize({ id: d.id, ...d.data() }));
-        setProducts(list);
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [user]);
+  // Filter out own products
+  const products = allProducts.filter(p => p.userId !== user?.id);
 
   let list = products.filter(p => {
     const ql = f.q.toLowerCase();
@@ -575,7 +562,7 @@ function ExplorePage({ favorites, onFav, user, navigate }) {
         </button>
       </div>
 
-      {loading ? (
+      {productsLoading ? (
         <div className="loading-state"><div className="spinner" /><p>Yükleniyor...</p></div>
       ) : mode === 'swipe' ? (
         <SwipeView products={list} favorites={favorites} onFav={onFav} user={user} navigate={navigate} />
@@ -621,17 +608,34 @@ function ExplorePage({ favorites, onFav, user, navigate }) {
 const EMPTY_FORM = { title: '', category: '', sub: '', city: '', condition: 'İyi', desc: '', wishlist: '' };
 
 function AddPage({ user, navigate }) {
-  const [form,    setForm]    = useState(EMPTY_FORM);
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState('');
-  const [done,    setDone]    = useState(false);
+  const [form,      setForm]      = useState(EMPTY_FORM);
+  const [imageFile, setImageFile] = useState(null);
+  const [preview,   setPreview]   = useState(null);
+  const [loading,   setLoading]   = useState(false);
+  const [error,     setError]     = useState('');
+  const [done,      setDone]      = useState(false);
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  const handleImg = e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImageFile(file);
+    setPreview(URL.createObjectURL(file));
+  };
 
   const handleSubmit = async e => {
     e.preventDefault();
     setLoading(true); setError('');
     try {
-      const ref = await addDoc(collection(db, 'products'), {
+      // Upload image to Firebase Storage if selected
+      let imageUrl = null;
+      if (imageFile) {
+        const fileRef = storageRef(storage, `products/${user.id}/${Date.now()}_${imageFile.name}`);
+        await uploadBytes(fileRef, imageFile);
+        imageUrl = await getDownloadURL(fileRef);
+      }
+
+      const docRef = await addDoc(collection(db, 'products'), {
         userId:      user.id,
         ownerName:   user.name,
         title:       form.title.trim(),
@@ -640,11 +644,11 @@ function AddPage({ user, navigate }) {
         condition:   form.condition,
         location:    form.city,
         wishlist:    form.wishlist.trim(),
-        imageUrl:    null, // TODO: Firebase Storage
+        imageUrl,
         value:       0,
         createdAt:   serverTimestamp(),
       });
-      if (ref.id) { setDone(true); setTimeout(() => navigate('explore'), 1600); }
+      if (docRef.id) { setDone(true); setTimeout(() => navigate('explore'), 1600); }
       else setError('Bir hata oluştu');
     } catch (err) {
       setError(err.message || 'Sunucu hatası');
@@ -669,6 +673,16 @@ function AddPage({ user, navigate }) {
         <p className="add-sub">Takaslamak istediğin ürünü ekle</p>
         {error && <div className="form-error">{error}</div>}
         <form onSubmit={handleSubmit} className="add-form">
+          <div className="fg">
+            <label>Fotoğraf</label>
+            <label className="upload-box">
+              <input type="file" accept="image/*" onChange={handleImg} style={{ display: 'none' }} />
+              {preview
+                ? <img src={preview} alt="önizleme" className="img-prev" />
+                : <div className="upload-ph"><span>📷</span><span>Fotoğraf ekle (opsiyonel)</span></div>
+              }
+            </label>
+          </div>
           <div className="fg">
             <label>Başlık *</label>
             <input type="text" placeholder="Ürün adı" value={form.title}
@@ -735,7 +749,7 @@ function MatchesPage({ user, navigate }) {
   const [loading,     setLoading]     = useState(true);
   const bottomRef = useRef(null);
 
-  // Load matches (user can be user1 or user2)
+  // Load matches once — getDocs is faster and sufficient (no real-time needed for list)
   useEffect(() => {
     if (!user) return;
     const q = query(
@@ -743,11 +757,10 @@ function MatchesPage({ user, navigate }) {
       where('participants', 'array-contains', user.id),
       orderBy('createdAt', 'desc')
     );
-    const unsub = onSnapshot(q, snap => {
-      setMatches(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setLoading(false);
-    });
-    return unsub;
+    getDocs(q)
+      .then(snap => setMatches(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+      .catch(console.error)
+      .finally(() => setLoading(false));
   }, [user]);
 
   // Real-time messages — Firebase superpower vs old polling
@@ -1172,6 +1185,19 @@ export default function App() {
   const [theme, setTheme]         = useLS('takas_theme', 'dark');
   const authHook = useAuth();
 
+  // Fetch products once after login — passed down to avoid refetch on every navigation
+  const [allProducts,     setAllProducts]     = useState([]);
+  const [productsLoading, setProductsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!authHook.user) { setAllProducts([]); setProductsLoading(true); return; }
+    setProductsLoading(true);
+    getDocs(query(collection(db, 'products'), orderBy('createdAt', 'desc')))
+      .then(snap => setAllProducts(snap.docs.map(d => normalize({ id: d.id, ...d.data() }))))
+      .catch(console.error)
+      .finally(() => setProductsLoading(false));
+  }, [authHook.user?.id]);
+
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     document.documentElement.style.background = theme === 'dark' ? '#0C0C0E' : '#F5F5F5';
@@ -1251,11 +1277,11 @@ export default function App() {
         </header>
 
         <main className="main">
-          {page === 'explore' && <ExplorePage favorites={favorites} onFav={toggleFav} user={user} navigate={navigate} />}
+          {page === 'explore' && <ExplorePage favorites={favorites} onFav={toggleFav} user={user} navigate={navigate} allProducts={allProducts} productsLoading={productsLoading} />}
           {page === 'matches' && <MatchesPage user={user} navigate={navigate} />}
           {page === 'add'     && <AddPage user={user} navigate={navigate} />}
           {page === 'admin'   && isAdmin  && <AdminPage />}
-          {page === 'admin'   && !isAdmin && <ExplorePage favorites={favorites} onFav={toggleFav} user={user} navigate={navigate} />}
+          {page === 'admin'   && !isAdmin && <ExplorePage favorites={favorites} onFav={toggleFav} user={user} navigate={navigate} allProducts={allProducts} productsLoading={productsLoading} />}
           {page === 'profile' && <ProfilePage favorites={favorites} onFav={toggleFav} navigate={navigate} user={user} onLogout={authHook.logout} />}
         </main>
 

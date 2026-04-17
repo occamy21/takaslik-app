@@ -33,6 +33,29 @@
   --bnav-h:     64px;
 }
 
+/* ─── Light Mode Variable Overrides ──────────────────────────────────────── */
+[data-theme="light"] {
+  --bg:         #F4F4F7;
+  --surface:    #FFFFFF;
+  --surface-2:  #EAEAEF;
+  --surface-3:  #E0E0E8;
+  --border:     #DCDCE6;
+  --border-2:   #C8C8D4;
+  --text:       #18181C;
+  --text-2:     #52525E;
+  --text-muted: #8A8A9E;
+  --shadow:     0 1px 4px rgba(0,0,0,0.07), 0 4px 16px rgba(0,0,0,0.05);
+  --shadow-md:  0 4px 24px rgba(0,0,0,0.09);
+  --shadow-lg:  0 16px 60px rgba(0,0,0,0.13);
+}
+
+/* Hardcoded dark backgrounds that don't use variables */
+[data-theme="light"] .header     { background: rgba(244,244,247,0.88); }
+[data-theme="light"] .bottom-nav { background: rgba(244,244,247,0.94); }
+[data-theme="light"] .auth-card  { background: rgba(255,255,255,0.94); border-color: rgba(0,0,0,0.07); }
+[data-theme="light"] .auth-page::before,
+[data-theme="light"] .auth-page::after { opacity: 0.35; }
+
 html { scroll-behavior: smooth; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
